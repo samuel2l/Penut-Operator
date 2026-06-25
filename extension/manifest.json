@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Penut Operator Prototype",
+  "description": "Batch 1 prototype connector for approved Penut browser tasks.",
+  "version": "0.1.0",
+  "permissions": ["tabs", "scripting", "alarms"],
+  "host_permissions": [
+    "http://127.0.0.1:4877/*",
+    "https://www.linkedin.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["content-linkedin.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Penut Operator",
+    "default_popup": "popup.html"
+  }
+}

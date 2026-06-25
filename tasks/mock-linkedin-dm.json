@@ -1,0 +1,16 @@
+{
+  "id": "task_mock_linkedin_dm_001",
+  "platform": "linkedin",
+  "action": "send_dm",
+  "status": "pending",
+  "riskLevel": "medium",
+  "requestedBy": "Penut Agent",
+  "accountOwner": "Supervisor A",
+  "target": {
+    "name": "Michael Kwabena Adu-Gyamfi",
+    "profileUrl": "https://www.linkedin.com/in/michael-kwabena-adu-gyamfi/"
+  },
+  "messageDraft": "Hey Michael, I came across your profile and thought your work was interesting. Curious to connect and learn more about what you are building.",
+  "context": "Prototype task for Batch 1. The extension should open the profile, prepare the DM, and pause before final send.",
+  "createdAt": "2026-06-25T00:00:00.000Z"
+}

@@ -1,0 +1,172 @@
+import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+import { extname, join, resolve } from "node:path";
+
+const PORT = Number(process.env.PORT || 4877);
+const ROOT = resolve(import.meta.dirname, "..");
+const PUBLIC_DIR = join(import.meta.dirname, "public");
+const TASK_FILE = join(ROOT, "tasks", "mock-linkedin-dm.json");
+
+const mimeTypes = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+};
+
+let task = JSON.parse(await readFile(TASK_FILE, "utf8"));
+let events = [
+  event("system", "Loaded mock LinkedIn DM task."),
+];
+
+function event(type, message, extra = {}) {
+  return {
+    id: crypto.randomUUID(),
+    type,
+    message,
+    at: new Date().toISOString(),
+    ...extra,
+  };
+}
+
+function json(res, status, body) {
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "content-type",
+  });
+  res.end(JSON.stringify(body, null, 2));
+}
+
+async function readBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString("utf8");
+  if (!raw) return {};
+  return JSON.parse(raw);
+}
+
+function publicTask() {
+  return {
+    ...task,
+    events,
+  };
+}
+
+function updateTask(patch, message) {
+  task = {
+    ...task,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  events = [event("task", message), ...events].slice(0, 50);
+}
+
+async function serveStatic(req, res) {
+  const url = new URL(req.url || "/", `http://${req.headers.host}`);
+  const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
+  const filePath = resolve(PUBLIC_DIR, `.${pathname}`);
+  if (!filePath.startsWith(PUBLIC_DIR)) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+  try {
+    const file = await readFile(filePath);
+    res.writeHead(200, {
+      "content-type": mimeTypes[extname(filePath)] || "application/octet-stream",
+    });
+    res.end(file);
+  } catch {
+    res.writeHead(404);
+    res.end("Not found");
+  }
+}
+
+const server = createServer(async (req, res) => {
+  if (req.method === "OPTIONS") return json(res, 200, { ok: true });
+
+  const url = new URL(req.url || "/", `http://${req.headers.host}`);
+
+  try {
+    if (url.pathname === "/api/task" && req.method === "GET") {
+      return json(res, 200, { task: publicTask() });
+    }
+
+    if (url.pathname === "/api/task/reset" && req.method === "POST") {
+      task = JSON.parse(await readFile(TASK_FILE, "utf8"));
+      events = [event("system", "Reset mock LinkedIn DM task.")];
+      return json(res, 200, { task: publicTask() });
+    }
+
+    if (url.pathname === "/api/task/update" && req.method === "POST") {
+      const body = await readBody(req);
+      const messageDraft =
+        typeof body.messageDraft === "string"
+          ? body.messageDraft.trim()
+          : task.messageDraft;
+      updateTask({ messageDraft }, "Draft updated in operator shell.");
+      return json(res, 200, { task: publicTask() });
+    }
+
+    if (url.pathname === "/api/task/approve" && req.method === "POST") {
+      updateTask(
+        { status: "approved_waiting_for_run" },
+        "Task approved. Ready for local browser execution.",
+      );
+      return json(res, 200, { task: publicTask() });
+    }
+
+    if (url.pathname === "/api/task/reject" && req.method === "POST") {
+      updateTask({ status: "rejected" }, "Task rejected by account owner.");
+      return json(res, 200, { task: publicTask() });
+    }
+
+    if (url.pathname === "/api/task/run" && req.method === "POST") {
+      if (!["approved_waiting_for_run", "failed"].includes(task.status)) {
+        return json(res, 409, {
+          error: "Task must be approved before it can run.",
+          task: publicTask(),
+        });
+      }
+      updateTask(
+        { status: "approved_waiting_for_extension" },
+        "Task released to browser extension.",
+      );
+      return json(res, 200, { task: publicTask() });
+    }
+
+    if (url.pathname === "/api/extension/next-task" && req.method === "GET") {
+      if (task.status !== "approved_waiting_for_extension") {
+        return json(res, 200, { task: null });
+      }
+      updateTask({ status: "claimed_by_extension" }, "Extension claimed task.");
+      return json(res, 200, { task });
+    }
+
+    if (url.pathname === "/api/extension/events" && req.method === "POST") {
+      const body = await readBody(req);
+      const status = typeof body.status === "string" ? body.status : undefined;
+      const message =
+        typeof body.message === "string" ? body.message : "Extension update.";
+      events = [
+        event("extension", message, { status, detail: body.detail }),
+        ...events,
+      ].slice(0, 50);
+      if (status) task = { ...task, status, updatedAt: new Date().toISOString() };
+      return json(res, 200, { task: publicTask() });
+    }
+
+    return serveStatic(req, res);
+  } catch (error) {
+    return json(res, 500, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+server.listen(PORT, "127.0.0.1", () => {
+  console.log(`Penut Operator prototype running at http://127.0.0.1:${PORT}`);
+});

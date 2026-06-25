@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        width: 260px;
+        margin: 0;
+        padding: 14px;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #142033;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+      p {
+        margin: 0 0 12px;
+        color: #667085;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 6px;
+        padding: 9px 10px;
+        background: #2563eb;
+        color: #fff;
+        font-weight: 700;
+      }
+      #status {
+        margin-top: 10px;
+        font-size: 12px;
+        color: #667085;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Penut Operator</h1>
+    <p>Poll the local operator shell for an approved browser task.</p>
+    <button id="poll">Check for task</button>
+    <div id="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>

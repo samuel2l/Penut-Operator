@@ -1,0 +1,10 @@
+{
+  "name": "penut-operator-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "desktop": "node desktop/server.mjs",
+    "start": "node desktop/server.mjs"
+  }
+}

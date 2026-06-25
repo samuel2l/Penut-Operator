@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Penut Operator Prototype</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="mark">P</div>
+          <div>
+            <strong>Penut Operator</strong>
+            <span>Batch 1 prototype</span>
+          </div>
+        </div>
+        <nav>
+          <button class="nav-item active">Approvals</button>
+          <button class="nav-item" disabled>Browser sessions</button>
+          <button class="nav-item" disabled>History</button>
+        </nav>
+      </aside>
+
+      <section class="content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Local approval inbox</p>
+            <h1>LinkedIn browser task</h1>
+          </div>
+          <span id="statusBadge" class="badge">Loading</span>
+        </header>
+
+        <section class="grid">
+          <article class="panel task-panel">
+            <div class="section-title">
+              <h2 id="taskTitle">Loading task...</h2>
+              <p id="taskContext"></p>
+            </div>
+
+            <dl class="meta">
+              <div>
+                <dt>Requested by</dt>
+                <dd id="requestedBy">-</dd>
+              </div>
+              <div>
+                <dt>Account owner</dt>
+                <dd id="accountOwner">-</dd>
+              </div>
+              <div>
+                <dt>Target</dt>
+                <dd><a id="targetLink" href="#" target="_blank" rel="noreferrer">-</a></dd>
+              </div>
+              <div>
+                <dt>Risk</dt>
+                <dd id="riskLevel">-</dd>
+              </div>
+            </dl>
+
+            <label class="field">
+              <span>Message draft</span>
+              <textarea id="messageDraft" rows="8"></textarea>
+            </label>
+
+            <div class="actions">
+              <button id="saveBtn" class="secondary">Save edit</button>
+              <button id="resetBtn" class="secondary">Reset demo</button>
+              <button id="rejectBtn" class="danger">Reject</button>
+              <button id="approveBtn">Approve</button>
+              <button id="runBtn" class="primary">Run in browser</button>
+            </div>
+
+            <p class="safety">
+              Safer mode: the extension should prepare the message only. The user must review before final send.
+            </p>
+          </article>
+
+          <aside class="panel">
+            <div class="section-title">
+              <h2>Execution log</h2>
+              <p>Local events from the operator shell and extension.</p>
+            </div>
+            <ol id="eventList" class="events"></ol>
+          </aside>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
