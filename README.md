@@ -17,8 +17,8 @@ This repository now contains the Electron-first operator scaffold:
 ```text
 src/main/          Electron main process and IPC
 src/renderer/      Approval UI
-src/agent/         Local agent runtime and task planner
-src/browser/       Browser-control abstraction
+src/agent/         AI action planner, local agent runtime, and browser action vocabulary
+src/browser/       Generic normal-Chrome control abstraction
 src/storage/       Local task storage
 fixtures/          Sample task seed data
 ```
@@ -30,6 +30,13 @@ The old Chrome-extension prototype has been removed from the active code path.
 ```bash
 npm install
 npm run dev
+```
+
+Create a local `.env` file before running the real AI operator:
+
+```bash
+OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=gpt-4.1-mini
 ```
 
 For a non-UI smoke test:
@@ -64,17 +71,15 @@ npm run check
 
 ## Browser-Control Plan
 
-The next implementation layer is a hybrid browser agent:
+The active implementation is an AI browser-agent loop:
 
 - Use normal Chrome via Apple Events on macOS for the first proof of concept.
-- Use DOM/accessibility state first.
-- Use screenshots only for ambiguous visual decisions and audit artifacts.
+- Observe the current browser page as structured data.
+- Ask the AI planner for one next action.
+- Execute only approved generic actions: open URL, click element, type text, press key, scroll, wait, pause, complete, or fail.
+- Repeat until the task is complete, paused for user review, or blocked.
+- Use DOM/accessibility state first; screenshots can be added later for ambiguous visual decisions and audit artifacts.
+- Do not execute arbitrary model-generated code.
 - Keep a safety checkpoint before final send/post actions.
-
-The first supported workflow is:
-
-```text
-Send a LinkedIn DM to [person] about [topic]. Pause before final Send.
-```
 
 The UI and runtime are intentionally separated so the browser-control layer can evolve without rewriting the desktop app.
