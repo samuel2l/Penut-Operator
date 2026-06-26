@@ -143,36 +143,132 @@ async function runLinkedInTask(task) {
         return;
       }
 
-      await copyDraftToClipboard(profileTab.id, task.messageDraft || "");
       await report(
-        "needs_manual_paste",
+        "failed",
         directFill?.error ||
-          "LinkedIn composer opened, but the editor could not be filled. Draft copied for manual paste.",
+          "LinkedIn composer opened, but the DM editor could not be filled.",
         directFill,
       );
       return;
     }
 
     await report("profile_opened", "LinkedIn profile loaded. Preparing to open message composer.");
+    const extracted = await sendMessageWithRetry(profileTab.id, {
+      type: "PENUT_EXTRACT_LINKEDIN_PROFILE_URN",
+      task,
+    }).catch((error) => ({ ok: false, error: error.message || String(error) }));
+
+    if (extracted?.ok && extracted.messagingUrl) {
+      await report("opening_composer", "Extracted LinkedIn member id. Opening DM composer directly.", {
+        messagingUrl: extracted.messagingUrl,
+        urn: extracted.urn,
+      });
+      await cacheRecipientUrl(task, extracted.messagingUrl);
+      const composerTab = await openOrFocusTab(extracted.messagingUrl);
+      await waitForTabReady(composerTab.id);
+      const extractedFill = await sendMessageToLinkedInFrames(composerTab.id, {
+        type: "PENUT_FILL_LINKEDIN_DM",
+        task,
+      });
+
+      if (extractedFill?.ok) {
+        await reportPrepared(extractedFill);
+        return;
+      }
+
+      await report(
+        "failed",
+        extractedFill?.error ||
+          "Opened LinkedIn DM composer from extracted member id, but could not fill the editor.",
+        extractedFill,
+      );
+      return;
+    }
+
+    await report("opening_composer", "Could not extract member id. Trying profile Message button.", extracted);
     const openResponse = await sendMessageWithRetry(profileTab.id, {
       type: "PENUT_OPEN_LINKEDIN_DM_COMPOSER",
       task,
-    });
+    }).catch((error) => ({ ok: false, possibleNavigation: true, error: error.message || String(error) }));
 
     if (!openResponse?.ok) {
-      await copyDraftToClipboard(profileTab.id, task.messageDraft || "");
+      const possibleComposerTab = await waitForLinkedInComposerTab(profileTab.id);
+      if (possibleComposerTab?.url?.includes("linkedin.com/messaging/")) {
+        await cacheRecipientUrl(task, possibleComposerTab.url);
+        const possibleFill = await sendMessageToLinkedInFrames(possibleComposerTab.id, {
+          type: "PENUT_FILL_LINKEDIN_DM",
+          task,
+        });
+        if (possibleFill?.ok) {
+          await report("composer_opened", "LinkedIn DM composer opened after Message click.", {
+            url: possibleComposerTab.url,
+          });
+          await reportPrepared(possibleFill);
+          return;
+        }
+      }
+
       await report(
-        "needs_manual_paste",
+        "failed",
         openResponse?.error ||
-          "Could not open LinkedIn composer. Draft copied to clipboard for manual paste.",
+          "Could not open LinkedIn DM composer from this connected profile.",
         openResponse,
+      );
+      return;
+    }
+
+    if (openResponse.messagingUrl) {
+      await cacheRecipientUrl(task, openResponse.messagingUrl);
+      await report("opening_composer", "Opening LinkedIn DM composer from Message link.", {
+        messagingUrl: openResponse.messagingUrl,
+      });
+      const linkedComposerTab = await openOrFocusTab(openResponse.messagingUrl);
+      await waitForTabReady(linkedComposerTab.id);
+      const linkedFill = await sendMessageToLinkedInFrames(linkedComposerTab.id, {
+        type: "PENUT_FILL_LINKEDIN_DM",
+        task,
+      });
+
+      if (linkedFill?.ok) {
+        await reportPrepared(linkedFill);
+        return;
+      }
+
+      await report(
+        "failed",
+        linkedFill?.error ||
+          "Opened LinkedIn DM composer from Message link, but could not fill the editor.",
+        linkedFill,
       );
       return;
     }
 
     await report("opening_composer", "Message button clicked. Waiting for LinkedIn composer.");
     await sleep(500);
-    const profileFill = await sendMessageToLinkedInFrames(profileTab.id, {
+    const discoveredTab = await waitForLinkedInComposerTab(profileTab.id);
+    if (discoveredTab?.url?.includes("linkedin.com/messaging/")) {
+      await cacheRecipientUrl(task, discoveredTab.url);
+      await report("composer_opened", "Discovered and cached LinkedIn DM composer URL.", {
+        url: discoveredTab.url,
+      });
+    }
+
+    const fillTab = discoveredTab || profileTab;
+    if (fillTab.id === profileTab.id && !fillTab.url?.includes("linkedin.com/messaging/")) {
+      const overlayReady = await sendMessageWithRetry(profileTab.id, {
+        type: "PENUT_HAS_LINKEDIN_DM_COMPOSER",
+      }).catch(() => ({ ok: false }));
+      if (!overlayReady?.ok) {
+        await report(
+          "failed",
+          "Clicked Message, but LinkedIn did not open a detectable DM composer.",
+          overlayReady,
+        );
+        return;
+      }
+    }
+
+    const profileFill = await sendMessageToLinkedInFrames(fillTab.id, {
       type: "PENUT_FILL_LINKEDIN_DM",
       task,
     }).catch((error) => ({ ok: false, error: error.message || String(error) }));
@@ -182,7 +278,7 @@ async function runLinkedInTask(task) {
       return;
     }
 
-    const composeTab = await waitForLinkedInComposerTab(profileTab.id);
+    const composeTab = fillTab.id === profileTab.id ? await waitForLinkedInComposerTab(profileTab.id) : fillTab;
     if (composeTab.id !== profileTab.id) {
       await report("composer_opened", "Composer opened in a LinkedIn messaging tab.", {
         tabId: composeTab.id,
@@ -199,17 +295,10 @@ async function runLinkedInTask(task) {
 
     if (response?.ok) {
       await reportPrepared(response);
-    } else if (response?.fallback === "clipboard") {
-      await copyDraftToClipboard(composeTab.id, task.messageDraft || "");
-      await report(
-        "needs_manual_paste",
-        "LinkedIn opened, but the editor could not be filled. Draft copied to clipboard for manual paste.",
-        response,
-      );
     } else {
       await report(
         "failed",
-        response?.error || "LinkedIn content script could not prepare the DM.",
+        response?.error || "LinkedIn DM composer did not open or could not be filled.",
         response,
       );
     }
@@ -232,7 +321,7 @@ async function waitForLinkedInComposerTab(profileTabId) {
   const started = Date.now();
   let lastProfileTab = await chrome.tabs.get(profileTabId);
 
-  while (Date.now() - started < 1800) {
+  while (Date.now() - started < 8000) {
     const profileTab = await chrome.tabs.get(profileTabId).catch(() => null);
     if (profileTab?.url?.includes("linkedin.com/messaging/")) {
       await waitForTabReady(profileTab.id);
@@ -259,32 +348,14 @@ async function waitForLinkedInComposerTab(profileTabId) {
   return lastProfileTab;
 }
 
-async function copyDraftToClipboard(tabId, text) {
-  const results = await chrome.scripting.executeScript({
-    target: { tabId, allFrames: true },
-    args: [text],
-    func: async (draft) => {
-      let copied = false;
-      try {
-        await navigator.clipboard.writeText(draft);
-        copied = true;
-      } catch {
-        const textarea = document.createElement("textarea");
-        textarea.value = draft;
-        textarea.style.position = "fixed";
-        textarea.style.left = "-9999px";
-        document.documentElement.append(textarea);
-        textarea.select();
-        copied = document.execCommand("copy");
-        textarea.remove();
-      }
-      return copied;
-    },
-  });
-
-  const copied = results.some((result) => result.result === true);
-  if (!copied) await showManualFallback(tabId, text);
-  return copied;
+async function cacheRecipientUrl(task, messagingUrl) {
+  const profileUrl = task.target?.profileUrl;
+  if (!profileUrl || !messagingUrl) return;
+  await fetch(`${BRIDGE}/api/extension/cache-recipient`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ profileUrl, messagingUrl }),
+  }).catch(() => {});
 }
 
 async function waitForTabReady(tabId) {
@@ -334,8 +405,7 @@ async function sendMessageToLinkedInFrames(tabId, message) {
             resolve(response);
             return;
           }
-          if (response?.fallback === "clipboard") bestFailure = response;
-          else if (!bestFailure) bestFailure = response;
+          if (!bestFailure) bestFailure = response;
         })
         .catch((error) => {
           if (!bestFailure) bestFailure = { ok: false, error: error.message || String(error) };
@@ -362,13 +432,6 @@ async function sendMessageWithRetry(tabId, message, frameId) {
     }
   }
   throw new Error("Could not reach LinkedIn content script.");
-}
-
-async function showManualFallback(tabId, text) {
-  await sendMessageToLinkedInFrames(tabId, {
-    type: "PENUT_SHOW_MANUAL_FALLBACK",
-    text,
-  }).catch(() => {});
 }
 
 function sleep(ms) {

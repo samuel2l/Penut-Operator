@@ -23,8 +23,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "PENUT_SHOW_MANUAL_FALLBACK") {
-    showManualFallback(message.text || "")
+  if (message?.type === "PENUT_EXTRACT_LINKEDIN_PROFILE_URN") {
+    Promise.resolve(extractLinkedInProfileUrn(message.task))
       .then((result) => sendResponse(result))
       .catch((error) =>
         sendResponse({
@@ -32,6 +32,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           error: error instanceof Error ? error.message : String(error),
         }),
       );
+    return true;
+  }
+
+  if (message?.type === "PENUT_HAS_LINKEDIN_DM_COMPOSER") {
+    sendResponse({ ok: hasVisibleMessageComposerSurface() });
     return true;
   }
 
@@ -64,12 +69,21 @@ async function openLinkedInDmComposer(_task) {
 
   const messageButton = await findMessageButton();
   if (!messageButton) {
-    injectBanner("Could not find a Message button. The draft will be copied for manual use.", true);
+    injectBanner("Could not find a LinkedIn Message button for this profile.", true);
     return {
       ok: false,
-      fallback: "clipboard",
-      error: "Could not find a Message button. The lead may not allow messages from this account.",
+      error: "Could not find a LinkedIn Message button for this connected profile.",
       debug: collectDebugInfo(),
+    };
+  }
+
+  const href = messageButton instanceof HTMLAnchorElement ? messageButton.href : "";
+  if (href && href.includes("linkedin.com/messaging/")) {
+    return {
+      ok: true,
+      composerOpenRequested: false,
+      messagingUrl: href,
+      url: window.location.href,
     };
   }
 
@@ -83,8 +97,90 @@ async function openLinkedInDmComposer(_task) {
   };
 }
 
+function extractLinkedInProfileUrn(task) {
+  const html = document.documentElement.innerHTML;
+  const publicIdentifier = getProfileSlug(task?.target?.profileUrl || window.location.href);
+  const targetName = normalizeText(task?.target?.name || "");
+  const candidates = collectProfileUrnCandidates(html)
+    .map((urn) => ({
+      urn,
+      score: scoreProfileUrnCandidate(html, urn, publicIdentifier, targetName),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const best = candidates[0];
+  if (!best?.urn) {
+    return {
+      ok: false,
+      error: "Could not extract LinkedIn profile member URN from this page.",
+      debug: collectDebugInfo(),
+    };
+  }
+
+  return {
+    ok: true,
+    urn: best.urn,
+    messagingUrl: `https://www.linkedin.com/messaging/thread/new/?recipient=${encodeURIComponent(best.urn)}&screenContext=NON_SELF_PROFILE_VIEW`,
+    candidates: candidates.slice(0, 5),
+  };
+}
+
+function collectProfileUrnCandidates(html) {
+  const candidates = new Set();
+  const patterns = [
+    /urn:li:fsd_profile:(ACo[A-Za-z0-9_-]+)/g,
+    /urn:li:fs_miniProfile:(ACo[A-Za-z0-9_-]+)/g,
+    /"entityUrn"\s*:\s*"urn:li:fsd_profile:(ACo[A-Za-z0-9_-]+)"/g,
+    /"profileUrn"\s*:\s*"urn:li:fsd_profile:(ACo[A-Za-z0-9_-]+)"/g,
+    /"objectUrn"\s*:\s*"urn:li:member:(ACo[A-Za-z0-9_-]+)"/g,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of html.matchAll(pattern)) candidates.add(match[1]);
+  }
+
+  return Array.from(candidates);
+}
+
+function scoreProfileUrnCandidate(html, urn, publicIdentifier, targetName) {
+  const firstIndex = html.indexOf(urn);
+  const windowText =
+    firstIndex >= 0
+      ? html.slice(Math.max(0, firstIndex - 3000), Math.min(html.length, firstIndex + 3000))
+      : "";
+  const normalizedWindow = normalizeText(windowText).toLowerCase();
+
+  let score = 0;
+  if (firstIndex >= 0) score += 10;
+  if (publicIdentifier && normalizedWindow.includes(publicIdentifier.toLowerCase())) score += 120;
+  if (targetName && normalizedWindow.includes(targetName.toLowerCase())) score += 80;
+  if (normalizedWindow.includes("fsd_profile")) score += 30;
+  if (normalizedWindow.includes("topcard") || normalizedWindow.includes("top-card")) score += 25;
+  if (normalizedWindow.includes("profile")) score += 10;
+  return score;
+}
+
+function getProfileSlug(url) {
+  try {
+    const parsed = new URL(url);
+    const match = parsed.pathname.match(/\/in\/([^/?#]+)/);
+    return match?.[1] || "";
+  } catch {
+    return "";
+  }
+}
+
 async function fillLinkedInDm(task) {
   injectBanner("Looking for LinkedIn message editor...");
+
+  const onMessagingPage = window.location.href.includes("/messaging/");
+  if (!onMessagingPage && !hasVisibleMessageComposerSurface()) {
+    return {
+      ok: false,
+      error: "LinkedIn DM composer is not open on this profile page.",
+      debug: collectDebugInfo(),
+    };
+  }
 
   let editor = await findMessageEditor();
   if (!editor && !window.location.href.includes("/messaging/")) {
@@ -99,18 +195,25 @@ async function fillLinkedInDm(task) {
 
   if (!editor) {
     injectBanner(
-      "LinkedIn opened, but Penut could not safely fill the editor. Draft copied to clipboard; paste it manually.",
+      "LinkedIn opened, but Penut could not find the DM editor.",
       true,
     );
     return {
       ok: false,
-      fallback: "clipboard",
-      error: "Could not find LinkedIn message editor.",
+      error: "Could not find LinkedIn DM editor.",
       debug: collectDebugInfo(),
     };
   }
 
-  setEditorText(editor, task.messageDraft || "");
+  const inserted = setEditorText(editor, task.messageDraft || "");
+  if (!inserted) {
+    injectBanner("Penut found the DM editor, but the draft did not insert.", true);
+    return {
+      ok: false,
+      error: "Found LinkedIn DM editor, but draft insertion did not stick.",
+      debug: collectDebugInfo(),
+    };
+  }
   const shouldSend = task.sendMode === "approve_then_send";
   if (shouldSend) {
     const sendButton = await findSendButton();
@@ -157,7 +260,7 @@ async function findMessageButton() {
 
 async function findMessageEditor() {
   const started = Date.now();
-  while (Date.now() - started < 5000) {
+  while (Date.now() - started < 10000) {
     const directEditor = queryMessageEditor();
     if (directEditor) return directEditor;
 
@@ -183,17 +286,67 @@ async function findMessageEditor() {
 
 function queryMessageEditor() {
   const selector = [
+    ".msg-form__contenteditable[contenteditable='true']",
+    ".msg-form__contenteditable [contenteditable='true']",
     ".msg-form__contenteditable",
     ".msg-form__msg-content-container [contenteditable='true']",
     ".msg-form [contenteditable='true']",
+    ".msg-form div[role='textbox']",
+    ".msg-form textarea",
+    ".ProseMirror[contenteditable='true']",
     '[aria-label*="Write a message" i]',
+    '[aria-label*="Type a message" i]',
     '[role="textbox"]',
     '[data-placeholder*="Write a message" i]',
+    '[data-placeholder*="Type a message" i]',
     '[contenteditable="true"]',
     "textarea",
   ].join(", ");
-  const editors = Array.from(document.querySelectorAll(selector));
-  return editors.find(isUsableMessageEditor) || null;
+  const editors = Array.from(document.querySelectorAll(selector))
+    .map(resolveEditableElement)
+    .filter(Boolean);
+  return pickBestEditor(editors);
+}
+
+function resolveEditableElement(element) {
+  if (!(element instanceof HTMLElement)) return null;
+  if (element.matches("textarea, [contenteditable='true'], [role='textbox']")) return element;
+  return element.querySelector("textarea, [contenteditable='true'], [role='textbox']");
+}
+
+function pickBestEditor(editors) {
+  const uniqueEditors = Array.from(new Set(editors)).filter(isUsableMessageEditor);
+  if (!uniqueEditors.length) return null;
+
+  return uniqueEditors
+    .map((editor) => ({ editor, score: scoreMessageEditor(editor) }))
+    .sort((a, b) => b.score - a.score)[0].editor;
+}
+
+function scoreMessageEditor(editor) {
+  const rect = editor.getBoundingClientRect();
+  const className = String(editor.className || "").toLowerCase();
+  const label = [
+    editor.getAttribute("aria-label"),
+    editor.getAttribute("data-placeholder"),
+    editor.closest("[aria-label]")?.getAttribute("aria-label"),
+    editor.closest("[class]")?.className,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  let score = 0;
+  if (editor.closest(".msg-form")) score += 100;
+  if (editor.closest('[class*="msg-form"]')) score += 90;
+  if (editor.closest('[class*="msg-"]')) score += 40;
+  if (className.includes("msg-form")) score += 40;
+  if (className.includes("prosemirror")) score += 30;
+  if (label.includes("write a message") || label.includes("type a message")) score += 60;
+  if (label.includes("message")) score += 25;
+  if (rect.top > window.innerHeight * 0.35) score += 20;
+  if (rect.width > 240) score += 10;
+  return score;
 }
 
 async function findSendButton() {
@@ -228,7 +381,7 @@ function setEditorText(editor, text) {
   if (editor instanceof HTMLTextAreaElement) {
     editor.value = text;
     editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
-    return;
+    return editor.value === text;
   }
 
   const dataTransfer = new DataTransfer();
@@ -259,99 +412,12 @@ function setEditorText(editor, text) {
 
   editor.dispatchEvent(inputEvent);
   editor.dispatchEvent(new Event("change", { bubbles: true }));
+
+  return normalizeText(editor.innerText || editor.textContent || "").includes(normalizeText(text).slice(0, 24));
 }
 
-async function showManualFallback(text) {
-  const copied = await copyTextBestEffort(text);
-  const existing = document.querySelector("#penut-operator-manual-fallback");
-  if (existing) existing.remove();
-
-  const panel = document.createElement("div");
-  panel.id = "penut-operator-manual-fallback";
-
-  const title = document.createElement("div");
-  title.textContent = copied ? "Draft copied" : "Manual fallback";
-  title.style.fontWeight = "800";
-  title.style.marginBottom = "8px";
-
-  const body = document.createElement("div");
-  body.textContent = copied
-    ? "LinkedIn blocked automation. Paste the copied draft into the message box."
-    : "LinkedIn blocked automation and clipboard access. Copy this draft manually.";
-  body.style.marginBottom = "10px";
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.readOnly = false;
-  Object.assign(textarea.style, {
-    width: "100%",
-    height: "96px",
-    boxSizing: "border-box",
-    border: "1px solid #cbd5e1",
-    borderRadius: "6px",
-    padding: "8px",
-    font: "13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-  });
-
-  const copyButton = document.createElement("button");
-  copyButton.textContent = "Copy draft";
-  Object.assign(copyButton.style, {
-    marginTop: "10px",
-    border: "0",
-    borderRadius: "6px",
-    padding: "8px 10px",
-    background: "#2563eb",
-    color: "#fff",
-    fontWeight: "800",
-    cursor: "pointer",
-  });
-  copyButton.addEventListener("click", async () => {
-    const ok = await copyTextBestEffort(text);
-    copyButton.textContent = ok ? "Copied" : "Select text and copy";
-    textarea.focus();
-    textarea.select();
-  });
-
-  Object.assign(panel.style, {
-    position: "fixed",
-    right: "16px",
-    bottom: "16px",
-    zIndex: "2147483647",
-    width: "360px",
-    maxWidth: "calc(100vw - 32px)",
-    padding: "14px",
-    borderRadius: "8px",
-    boxShadow: "0 18px 40px rgba(15, 23, 42, 0.28)",
-    background: "#ffffff",
-    color: "#142033",
-    font: "13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-  });
-
-  panel.append(title, body, textarea, copyButton);
-  document.documentElement.append(panel);
-  textarea.focus();
-  textarea.select();
-
-  return { ok: copied, fallbackVisible: true };
-}
-
-async function copyTextBestEffort(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.style.position = "fixed";
-    textarea.style.left = "-9999px";
-    textarea.style.top = "0";
-    document.documentElement.append(textarea);
-    textarea.focus();
-    textarea.select();
-    const copied = document.execCommand("copy");
-    textarea.remove();
-    return copied;
-  }
+function normalizeText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 function isVisibleMessageButton(button) {
@@ -399,10 +465,15 @@ function isUsableMessageEditor(editor) {
   }
 
   const onMessagingPage = window.location.href.includes("/messaging/");
-  const inMessageSurface = Boolean(
+  const inStrictComposerSurface = Boolean(
     editor.closest(".msg-form") ||
       editor.closest('[class*="msg-form"]') ||
+      editor.closest('[class*="msg-overlay-conversation"]'),
+  );
+  const inMessageSurface = Boolean(
+    inStrictComposerSurface ||
       editor.closest('[class*="msg-"]') ||
+      editor.closest('[class*="conversation"]') ||
       editor.closest('[data-view-name*="message" i]'),
   );
 
@@ -412,6 +483,7 @@ function isUsableMessageEditor(editor) {
     editor.getAttribute("placeholder"),
     editor.className,
     editor.closest("[aria-label]")?.getAttribute("aria-label"),
+    editor.closest("[class]")?.className,
   ]
     .filter(Boolean)
     .join(" ")
@@ -419,11 +491,23 @@ function isUsableMessageEditor(editor) {
 
   const isLinkedInComposer =
     label.includes("write a message") ||
-    label.includes("message") ||
+    label.includes("type a message") ||
+    (onMessagingPage && label.includes("message")) ||
     inMessageSurface ||
-    (!onMessagingPage && (editor.isContentEditable || editor.getAttribute("role") === "textbox"));
+    (onMessagingPage &&
+      (editor.isContentEditable || editor.getAttribute("contenteditable") === "true") &&
+      editor.getBoundingClientRect().top > window.innerHeight * 0.25) ||
+    (!onMessagingPage && inStrictComposerSurface);
 
   return Boolean(isLinkedInComposer);
+}
+
+function hasVisibleMessageComposerSurface() {
+  return Array.from(
+    document.querySelectorAll(
+      ".msg-form, [class*='msg-form'], [class*='msg-overlay-conversation']",
+    ),
+  ).some((element) => element instanceof HTMLElement && isVisible(element, 120, 40));
 }
 
 function isVisible(element, minWidth = 1, minHeight = 1) {
@@ -523,6 +607,7 @@ function collectDebugInfo() {
       return {
         tag: element.tagName,
         role: element.getAttribute("role"),
+        href: element instanceof HTMLAnchorElement ? element.href : null,
         ariaLabel: element.getAttribute("aria-label"),
         dataPlaceholder: element.getAttribute("data-placeholder"),
         contenteditable: element.getAttribute("contenteditable"),

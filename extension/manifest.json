@@ -3,7 +3,7 @@
   "name": "Penut Operator Prototype",
   "description": "Batch 1 prototype connector for approved Penut browser tasks.",
   "version": "0.1.0",
-  "permissions": ["tabs", "scripting", "alarms", "clipboardWrite", "webNavigation"],
+  "permissions": ["tabs", "scripting", "alarms", "webNavigation"],
   "host_permissions": [
     "http://127.0.0.1:4877/*",
     "https://www.linkedin.com/*"

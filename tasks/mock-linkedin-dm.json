@@ -7,11 +7,10 @@
   "requestedBy": "Penut Agent",
   "accountOwner": "Supervisor A",
   "target": {
-    "name": "Michael Kwabena Adu-Gyamfi",
-    "profileUrl": "https://www.linkedin.com/in/michael-kwabena-adu-gyamfi/",
-    "messagingUrl": "https://www.linkedin.com/messaging/thread/new/?recipient=ACoAADjS1iYBg9tEEwGPADqDoqP7vKLR2k78i6U&screenContext=NON_SELF_PROFILE_VIEW"
+    "name": "Kelvin Fiador",
+    "profileUrl": "https://www.linkedin.com/in/kelvin-fiador-1258203b1/"
   },
-  "messageDraft": "Hey Michael, I came across your profile and thought your work was interesting. Curious to connect and learn more about what you are building.",
+  "messageDraft": "Hey Kelvin, I came across your profile and thought your work was interesting. Curious to connect and learn more about what you are building.",
   "sendMode": "prepare_only",
   "context": "Prototype task for Batch 1. The extension should open the profile, prepare the DM, and pause before final send.",
   "createdAt": "2026-06-25T00:00:00.000Z"

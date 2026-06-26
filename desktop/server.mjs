@@ -1,11 +1,12 @@
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 
 const PORT = Number(process.env.PORT || 4877);
 const ROOT = resolve(import.meta.dirname, "..");
 const PUBLIC_DIR = join(import.meta.dirname, "public");
 const TASK_FILE = join(ROOT, "tasks", "mock-linkedin-dm.json");
+const CACHE_FILE = join(ROOT, "tasks", "linkedin-recipient-cache.json");
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -20,6 +21,7 @@ let events = [
   event("system", "Loaded mock LinkedIn DM task."),
 ];
 let extensionWaiters = [];
+let recipientCache = await readRecipientCache();
 
 function event(type, message, extra = {}) {
   return {
@@ -50,8 +52,15 @@ async function readBody(req) {
 }
 
 function publicTask() {
+  const profileUrl = normalizeLinkedInProfileUrl(task.target?.profileUrl);
+  const cachedMessagingUrl = profileUrl ? recipientCache[profileUrl] : undefined;
   return {
     ...task,
+    target: {
+      ...task.target,
+      messagingUrl: task.target?.messagingUrl || cachedMessagingUrl,
+      cachedMessagingUrl,
+    },
     events,
   };
 }
@@ -67,8 +76,9 @@ function updateTask(patch, message) {
 
 function claimExtensionTask() {
   if (task.status !== "approved_waiting_for_extension") return null;
+  const nextTask = publicTask();
   updateTask({ status: "claimed_by_extension" }, "Extension claimed task.");
-  return task;
+  return nextTask;
 }
 
 function wakeExtensionWaiters() {
@@ -139,7 +149,23 @@ const server = createServer(async (req, res) => {
         typeof body.messageDraft === "string"
           ? body.messageDraft.trim()
           : task.messageDraft;
-      updateTask({ messageDraft }, "Draft updated in operator shell.");
+      const profileUrl =
+        typeof body.profileUrl === "string"
+          ? normalizeLinkedInProfileUrl(body.profileUrl)
+          : task.target?.profileUrl;
+      const targetName =
+        typeof body.targetName === "string" && body.targetName.trim()
+          ? body.targetName.trim()
+          : task.target?.name;
+      const target = {
+        ...task.target,
+        name: targetName,
+        profileUrl,
+      };
+      if (profileUrl !== normalizeLinkedInProfileUrl(task.target?.profileUrl)) {
+        delete target.messagingUrl;
+      }
+      updateTask({ messageDraft, target }, "Task updated in operator shell.");
       return json(res, 200, { task: publicTask() });
     }
 
@@ -157,7 +183,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/task/run" && req.method === "POST") {
-      if (!["approved_waiting_for_run", "failed", "needs_manual_paste"].includes(task.status)) {
+      if (!["approved_waiting_for_run", "failed"].includes(task.status)) {
         return json(res, 409, {
           error: "Task must be approved before it can run.",
           task: publicTask(),
@@ -194,6 +220,42 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { task: publicTask() });
     }
 
+    if (url.pathname === "/api/extension/cache-recipient" && req.method === "POST") {
+      const body = await readBody(req);
+      const profileUrl = normalizeLinkedInProfileUrl(body.profileUrl);
+      const messagingUrl =
+        typeof body.messagingUrl === "string" && body.messagingUrl.includes("/messaging/")
+          ? body.messagingUrl
+          : "";
+      if (!profileUrl || !messagingUrl) {
+        return json(res, 400, { error: "profileUrl and messagingUrl are required." });
+      }
+
+      recipientCache = {
+        ...recipientCache,
+        [profileUrl]: messagingUrl,
+      };
+      await writeRecipientCache(recipientCache);
+      if (normalizeLinkedInProfileUrl(task.target?.profileUrl) === profileUrl) {
+        task = {
+          ...task,
+          target: {
+            ...task.target,
+            messagingUrl,
+          },
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      events = [
+        event("extension", "Cached LinkedIn DM composer URL for this profile.", {
+          status: "cached_recipient",
+          detail: { profileUrl, messagingUrl },
+        }),
+        ...events,
+      ].slice(0, 50);
+      return json(res, 200, { task: publicTask() });
+    }
+
     return serveStatic(req, res);
   } catch (error) {
     return json(res, 500, {
@@ -201,6 +263,35 @@ const server = createServer(async (req, res) => {
     });
   }
 });
+
+async function readRecipientCache() {
+  try {
+    return JSON.parse(await readFile(CACHE_FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+async function writeRecipientCache(cache) {
+  await writeFile(CACHE_FILE, `${JSON.stringify(cache, null, 2)}\n`);
+}
+
+function normalizeLinkedInProfileUrl(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  try {
+    const parsed = new URL(trimmed);
+    parsed.hash = "";
+    parsed.search = "";
+    if (parsed.hostname === "linkedin.com") parsed.hostname = "www.linkedin.com";
+    if (!parsed.pathname.endsWith("/")) parsed.pathname = `${parsed.pathname}/`;
+    return parsed.toString();
+  } catch {
+    return trimmed;
+  }
+}
 
 function compactDetail(detail) {
   if (!detail || typeof detail !== "object") return detail;

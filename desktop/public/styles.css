@@ -27,6 +27,7 @@ body {
 }
 
 button,
+input,
 textarea {
   font: inherit;
 }
@@ -133,7 +134,6 @@ nav {
 .badge.profile_opened,
 .badge.opening_composer,
 .badge.composer_opened,
-.badge.needs_manual_paste,
 .badge.prepared_waiting_final_confirmation {
   border-color: #fedf89;
   background: #fffaeb;
@@ -202,14 +202,24 @@ a {
   font-weight: 700;
 }
 
+.target-editor {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+input,
 textarea {
   width: 100%;
-  resize: vertical;
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 12px;
   color: var(--ink);
   line-height: 1.45;
+}
+
+textarea {
+  resize: vertical;
 }
 
 .actions {

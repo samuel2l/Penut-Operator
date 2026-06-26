@@ -5,6 +5,8 @@ const requestedBy = document.querySelector("#requestedBy");
 const accountOwner = document.querySelector("#accountOwner");
 const targetLink = document.querySelector("#targetLink");
 const riskLevel = document.querySelector("#riskLevel");
+const targetName = document.querySelector("#targetName");
+const profileUrl = document.querySelector("#profileUrl");
 const messageDraft = document.querySelector("#messageDraft");
 const eventList = document.querySelector("#eventList");
 const saveBtn = document.querySelector("#saveBtn");
@@ -55,15 +57,17 @@ function render(task) {
   targetLink.textContent = task.target?.name || task.target?.profileUrl || "-";
   targetLink.href = task.target?.profileUrl || "#";
   riskLevel.textContent = task.riskLevel || "-";
+  targetName.value = task.target?.name || "";
+  profileUrl.value = task.target?.profileUrl || "";
   messageDraft.value = task.messageDraft || "";
 
   const canEdit = task.status === "pending" || task.status === "approved_waiting_for_run";
   saveBtn.disabled = !canEdit;
+  targetName.disabled = !canEdit;
+  profileUrl.disabled = !canEdit;
   approveBtn.disabled = task.status !== "pending";
   rejectBtn.disabled = !["pending", "approved_waiting_for_run"].includes(task.status);
-  runBtn.disabled = !["approved_waiting_for_run", "failed", "needs_manual_paste"].includes(
-    task.status,
-  );
+  runBtn.disabled = !["approved_waiting_for_run", "failed"].includes(task.status);
 
   eventList.replaceChildren(
     ...(task.events || []).map((item) => {
@@ -89,7 +93,11 @@ async function refresh() {
 saveBtn.addEventListener("click", async () => {
   const { task } = await api("/api/task/update", {
     method: "POST",
-    body: JSON.stringify({ messageDraft: messageDraft.value }),
+    body: JSON.stringify({
+      targetName: targetName.value,
+      profileUrl: profileUrl.value,
+      messageDraft: messageDraft.value,
+    }),
   });
   render(task);
 });
