@@ -1,5 +1,4 @@
 const taskPrompt = document.querySelector("#taskPrompt");
-const safetyMode = document.querySelector("#safetyMode");
 const statusBadge = document.querySelector("#statusBadge");
 const eventList = document.querySelector("#eventList");
 const saveBtn = document.querySelector("#saveBtn");
@@ -14,13 +13,11 @@ function humanStatus(status) {
 
 function render(task) {
   taskPrompt.value = task.prompt || "";
-  safetyMode.value = task.safetyMode || "prepare_only";
   statusBadge.textContent = humanStatus(task.status);
   statusBadge.className = `badge ${task.status}`;
 
   const canEdit = ["pending", "approved", "failed", "stopped"].includes(task.status);
   taskPrompt.disabled = !canEdit;
-  safetyMode.disabled = !canEdit;
   saveBtn.disabled = !canEdit;
   approveBtn.disabled = task.status !== "pending";
   runBtn.disabled = !["approved", "failed"].includes(task.status);
@@ -55,7 +52,6 @@ saveBtn.addEventListener("click", async () => {
   render(
     await window.penutOperator.updateTask({
       prompt: taskPrompt.value,
-      safetyMode: safetyMode.value,
     }),
   );
 });

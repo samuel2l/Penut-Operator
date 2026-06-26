@@ -3,6 +3,7 @@ import { AIActionPlanner } from "./ai/action-planner.js";
 import { BrowserActions } from "./browser-actions.js";
 
 const MAX_STEPS = 25;
+const MAX_REJECTED_ACTIONS = 4;
 
 export class OperatorAgentRuntime {
   #stopped = false;
@@ -25,7 +26,6 @@ export class OperatorAgentRuntime {
   async run(task) {
     await this.#emit("agent", "Operator run started.", {
       taskId: task.id,
-      safetyMode: task.safetyMode,
     });
 
     await this.#browser.connect();
@@ -38,7 +38,7 @@ export class OperatorAgentRuntime {
         return { ok: false, stopped: true };
       }
 
-      const observation = await this.#browser.observePage();
+      const observation = await this.#observeWithContent();
       await this.#emit("agent", "Observed browser page.", {
         url: observation.url,
         title: observation.title,
@@ -46,8 +46,31 @@ export class OperatorAgentRuntime {
       });
 
       const decision = await this.#planner.nextAction({ task, observation, history });
-      const validDecision = validateDecision(decision, observation, history);
-      const guardedDecision = applySafetyPolicy(validDecision, { task, observation });
+      const validDecision = validateDecisionOrReject(decision, observation, history, task);
+      if (validDecision.action === "rejected") {
+        const rejectionCount = history.filter((entry) => entry.action === "rejected").length + 1;
+        await this.#emit("agent", validDecision.reason, {
+          step: stepIndex + 1,
+          rejectedAction: decision.action,
+          elementId: decision.elementId,
+          url: decision.url,
+          rejectionCount,
+        });
+        if (rejectionCount >= MAX_REJECTED_ACTIONS) {
+          throw new Error(`AI planner kept choosing rejected actions. Last issue: ${validDecision.reason}`);
+        }
+        history.push({
+          action: "rejected",
+          reason: validDecision.reason,
+          rejectedAction: decision.action,
+          url: observation.url,
+          requestedUrl: decision.url,
+          elementId: decision.elementId,
+        });
+        continue;
+      }
+
+      const guardedDecision = validDecision;
       const targetElement = observation.elements.find(
         (element) => element.id === guardedDecision.elementId,
       );
@@ -82,6 +105,22 @@ export class OperatorAgentRuntime {
         return { ok: true, pausedBeforeSend: true };
       }
 
+      if (
+        guardedDecision.action === BrowserActions.Fail &&
+        observation.elements.length === 0 &&
+        !observation.visibleText
+      ) {
+        await this.#emit("agent", "Ignoring fail decision on empty browser observation; waiting for page content.", {
+          step: stepIndex + 1,
+          url: observation.url,
+        });
+        await this.#browser.execute({
+          action: BrowserActions.Wait,
+          milliseconds: 1500,
+        });
+        continue;
+      }
+
       if (guardedDecision.action === BrowserActions.Fail) {
         throw new Error(guardedDecision.text || guardedDecision.reason || "Operator could not continue.");
       }
@@ -94,6 +133,27 @@ export class OperatorAgentRuntime {
 
   async #emit(type, message, detail) {
     await this.#onEvent?.({ type, message, detail });
+  }
+
+  async #observeWithContent() {
+    if (this.#allowDryRun) return this.#browser.observePage();
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const observation = await this.#browser.observePage();
+      if (observation.elements.length > 0 || observation.visibleText) return observation;
+
+      await this.#emit("agent", "Browser page had no observable controls yet; waiting.", {
+        attempt: attempt + 1,
+        url: observation.url,
+        title: observation.title,
+      });
+      await this.#browser.execute({
+        action: BrowserActions.Wait,
+        milliseconds: 1500,
+      });
+    }
+
+    return this.#browser.observePage();
   }
 }
 
@@ -128,29 +188,18 @@ class DryRunActionPlanner {
   }
 }
 
-function applySafetyPolicy(decision, { task, observation }) {
-  if (decision.action !== BrowserActions.ClickElement) return decision;
-
-  const safetyMode = task.safetyMode || "prepare_only";
-  if (safetyMode === "approve_then_send") return decision;
-
-  const element = observation.elements.find((candidate) => candidate.id === decision.elementId);
-  const label = element?.label || "";
-  if (!/\b(send|post|reply|comment|publish|submit)\b/i.test(label)) return decision;
-
-  return {
-    action: BrowserActions.PauseForUser,
-    reason: "Safety policy blocked a final publishing action.",
-    url: "",
-    elementId: "",
-    text: `Paused before clicking "${label}".`,
-    key: "",
-    direction: "",
-    milliseconds: 0,
-  };
+function validateDecisionOrReject(decision, observation, history, task) {
+  try {
+    return validateDecision(decision, observation, history, task);
+  } catch (error) {
+    return {
+      action: "rejected",
+      reason: error.message,
+    };
+  }
 }
 
-function validateDecision(decision, observation, history) {
+function validateDecision(decision, observation, history, task) {
   if (!decision || typeof decision !== "object") {
     throw new Error("AI planner returned an invalid action.");
   }
@@ -196,6 +245,12 @@ function validateDecision(decision, observation, history) {
     );
   }
 
+  if (decision.action === BrowserActions.ClickElement && badGenericInboxClick(targetElement, task)) {
+    throw new Error(
+      `AI planner tried to open generic inbox navigation for a person-specific message task: "${targetElement.label}".`,
+    );
+  }
+
   if (decision.action === BrowserActions.PauseForUser) {
     const lastTyped = [...history].reverse().find((entry) => entry.action === BrowserActions.TypeText);
     if (lastTyped && isSearchOrNavigationLabel(lastTyped.elementLabel)) {
@@ -206,6 +261,25 @@ function validateDecision(decision, observation, history) {
   }
 
   return decision;
+}
+
+function badGenericInboxClick(element, task) {
+  const prompt = task.prompt || "";
+  if (!/\b(dm|message|send)\b/i.test(prompt)) return false;
+  if (!/\b(to|for)\s+[A-Z][\p{L}'-]+/u.test(prompt)) return false;
+
+  const label = element?.label || "";
+  if (!/\b(messaging|messages|inbox)\b/i.test(label)) return false;
+  return !personNameFromPrompt(prompt)
+    .toLowerCase()
+    .split(/\s+/)
+    .some((part) => part && label.toLowerCase().includes(part));
+}
+
+function personNameFromPrompt(prompt) {
+  return (
+    prompt.match(/\b(?:to|for)\s+(.+?)(?:\s+saying\b|\s+about\b|:|\.|$)/i)?.[1] || ""
+  ).trim();
 }
 
 function repeatedSameClick(decision, observation, history) {
@@ -230,7 +304,7 @@ function redundantOpenUrl(decision, observation, history) {
     .map((entry) => normalizeUrl(entry.requestedUrl || ""))
     .filter(Boolean);
 
-  return recentOpenUrls.filter((url) => url === targetUrl).length >= 1;
+  return recentOpenUrls.filter((url) => url === targetUrl).length >= 2;
 }
 
 function repeatedWait(history) {

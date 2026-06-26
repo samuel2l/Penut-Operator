@@ -75,6 +75,18 @@ export class ChromeController {
     }
 
     await this.#waitUntilReady();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const observation = await this.#readPageObservation();
+      if (observation.elements.length > 0 || observation.visibleText.length > 0) {
+        return observation;
+      }
+      await delay(500);
+    }
+
+    return this.#readPageObservation();
+  }
+
+  async #readPageObservation() {
     return this.#runJsonScript(`
       const selector = ${jsonStringify(INTERACTIVE_SELECTOR)};
       const clean = (value) => String(value || "").replace(/\\s+/g, " ").trim();
@@ -105,11 +117,12 @@ export class ChromeController {
 
       const elements = Array.from(document.querySelectorAll(selector))
         .filter(visible)
-        .slice(0, 80)
+        .slice(0, 120)
         .map((node, index) => {
           const rect = node.getBoundingClientRect();
           const tag = node.tagName.toLowerCase();
-          const editable = tag === "textarea" || tag === "input" || node.isContentEditable;
+          const hasEditableChild = Boolean(node.querySelector?.("input, textarea, [contenteditable='true'], [role='textbox']"));
+          const editable = tag === "textarea" || tag === "input" || node.isContentEditable || hasEditableChild;
           return {
             id: "el_" + index,
             tag,
@@ -173,6 +186,7 @@ export class ChromeController {
         set URL of active tab of front window to ${appleScriptString(url)}
       end tell
     `);
+    await this.#waitForUrlChange(url);
     await this.#waitUntilReady();
   }
 
@@ -193,22 +207,24 @@ export class ChromeController {
       if (!node) return { ok: false, reason: "Observed element no longer exists.", elementId: ${jsonStringify(elementId)} };
       node.scrollIntoView({ block: "center", inline: "center" });
       node.focus?.();
+      const href = node.href || node.closest("a[href]")?.href || "";
       node.click();
       return {
         ok: true,
         elementId: ${jsonStringify(elementId)},
+        href,
         label: [
           node.innerText,
           node.getAttribute("aria-label"),
           node.getAttribute("title"),
-          node.href,
+          href,
         ].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim().slice(0, 220),
       };
     `);
 
     if (!result.ok) throw new Error(result.reason);
     await this.#emit("browser", "Clicked observed element.", result);
-    await delay(800);
+    await delay(1500);
   }
 
   async #typeText(elementId, text) {
@@ -225,8 +241,19 @@ export class ChromeController {
         return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
       };
       const nodes = Array.from(document.querySelectorAll(selector)).filter(visible);
-      const node = nodes[index];
+      let node = nodes[index];
       if (!node) return { ok: false, reason: "Observed element no longer exists.", elementId: ${jsonStringify(elementId)} };
+      const editableSelector = "input, textarea, [contenteditable='true'], [role='textbox']";
+      if (
+        !(
+          node.tagName.toLowerCase() === "input" ||
+          node.tagName.toLowerCase() === "textarea" ||
+          node.isContentEditable
+        )
+      ) {
+        const nestedEditable = Array.from(node.querySelectorAll?.(editableSelector) || []).find(visible);
+        if (nestedEditable) node = nestedEditable;
+      }
 
       node.scrollIntoView({ block: "center", inline: "center" });
       node.focus?.();
@@ -234,23 +261,42 @@ export class ChromeController {
       if (node.tagName.toLowerCase() === "input" || node.tagName.toLowerCase() === "textarea") {
         node.value = text;
       } else if (node.isContentEditable) {
+        node.click();
         const selection = window.getSelection();
         const range = document.createRange();
         range.selectNodeContents(node);
         selection.removeAllRanges();
         selection.addRange(range);
 
+        node.dispatchEvent(new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          inputType: "insertText",
+          data: text,
+        }));
         const inserted = document.execCommand?.("insertText", false, text);
         if (!inserted) {
           node.textContent = text;
         }
+        selection.removeAllRanges();
       } else {
         return { ok: false, reason: "Observed element is not editable.", elementId: ${jsonStringify(elementId)} };
       }
 
       node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
       node.dispatchEvent(new Event("change", { bubbles: true }));
-      return { ok: true, elementId: ${jsonStringify(elementId)}, characterCount: text.length };
+      node.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: " " }));
+      node.blur?.();
+      node.focus?.();
+
+      const visibleText = (node.value || node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim();
+      return {
+        ok: visibleText.includes(text.slice(0, 40)),
+        reason: visibleText.includes(text.slice(0, 40)) ? "" : "Typed text was not visibly confirmed in the editor.",
+        elementId: ${jsonStringify(elementId)},
+        characterCount: text.length,
+        visibleText: visibleText.slice(0, 220),
+      };
     `);
 
     if (!result.ok) throw new Error(result.reason);
@@ -291,6 +337,17 @@ export class ChromeController {
     for (let attempt = 0; attempt < 30; attempt += 1) {
       const state = await this.#executeJavaScript("document.readyState").catch(() => "");
       if (state === "interactive" || state === "complete") return;
+      await delay(250);
+    }
+  }
+
+  async #waitForUrlChange(targetUrl) {
+    const expected = normalizeUrl(targetUrl);
+    if (!expected) return;
+
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const current = await this.#executeJavaScript("location.href").catch(() => "");
+      if (normalizeUrl(current) === expected || normalizeUrl(current).startsWith(expected)) return;
       await delay(250);
     }
   }
@@ -346,6 +403,16 @@ function appleScriptString(value) {
 
 function jsonStringify(value) {
   return JSON.stringify(value ?? "");
+}
+
+function normalizeUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    return `${url.origin}${url.pathname.replace(/\/$/, "")}`;
+  } catch {
+    return "";
+  }
 }
 
 function normalizeKey(key) {
