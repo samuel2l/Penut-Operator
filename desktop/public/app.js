@@ -29,6 +29,21 @@ function humanStatus(status) {
   return String(status || "unknown").replaceAll("_", " ");
 }
 
+function eventDetailText(item) {
+  const detail = item.detail;
+  if (!detail || typeof detail !== "object") return "";
+
+  if (detail.error) return detail.error;
+  if (detail.debug?.url) {
+    return [
+      `Page: ${detail.debug.url}`,
+      `Visible candidates: ${detail.debug.visibleCandidateCount ?? 0}`,
+    ].join(" | ");
+  }
+  if (detail.prepared) return "Draft was inserted; final send was not clicked.";
+  return "";
+}
+
 function render(task) {
   currentTask = task;
   statusBadge.textContent = humanStatus(task.status);
@@ -46,16 +61,21 @@ function render(task) {
   saveBtn.disabled = !canEdit;
   approveBtn.disabled = task.status !== "pending";
   rejectBtn.disabled = !["pending", "approved_waiting_for_run"].includes(task.status);
-  runBtn.disabled = !["approved_waiting_for_run", "failed"].includes(task.status);
+  runBtn.disabled = !["approved_waiting_for_run", "failed", "needs_manual_paste"].includes(
+    task.status,
+  );
 
   eventList.replaceChildren(
     ...(task.events || []).map((item) => {
       const li = document.createElement("li");
       const p = document.createElement("p");
       const time = document.createElement("time");
+      const detail = document.createElement("small");
       p.textContent = item.message;
       time.textContent = new Date(item.at).toLocaleString();
+      detail.textContent = eventDetailText(item);
       li.append(p, time);
+      if (detail.textContent) li.append(detail);
       return li;
     }),
   );

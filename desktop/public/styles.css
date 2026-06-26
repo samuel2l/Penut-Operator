@@ -129,6 +129,11 @@ nav {
 .badge.approved_waiting_for_extension,
 .badge.claimed_by_extension,
 .badge.running,
+.badge.opening_profile,
+.badge.profile_opened,
+.badge.opening_composer,
+.badge.composer_opened,
+.badge.needs_manual_paste,
 .badge.prepared_waiting_final_confirmation {
   border-color: #fedf89;
   background: #fffaeb;
@@ -266,6 +271,15 @@ button.primary {
 .events time {
   display: block;
   margin-top: 2px;
+}
+
+.events small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 900px) {

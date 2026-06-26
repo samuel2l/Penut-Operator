@@ -19,6 +19,7 @@ let task = JSON.parse(await readFile(TASK_FILE, "utf8"));
 let events = [
   event("system", "Loaded mock LinkedIn DM task."),
 ];
+let extensionWaiters = [];
 
 function event(type, message, extra = {}) {
   return {
@@ -62,6 +63,37 @@ function updateTask(patch, message) {
     updatedAt: new Date().toISOString(),
   };
   events = [event("task", message), ...events].slice(0, 50);
+}
+
+function claimExtensionTask() {
+  if (task.status !== "approved_waiting_for_extension") return null;
+  updateTask({ status: "claimed_by_extension" }, "Extension claimed task.");
+  return task;
+}
+
+function wakeExtensionWaiters() {
+  const readyTask = claimExtensionTask();
+  if (!readyTask) return;
+  const waiters = extensionWaiters;
+  extensionWaiters = [];
+  for (const waiter of waiters) waiter(readyTask);
+}
+
+function waitForExtensionTask(timeoutMs = 25000) {
+  const readyTask = claimExtensionTask();
+  if (readyTask) return Promise.resolve(readyTask);
+
+  return new Promise((resolve) => {
+    const waiter = (nextTask) => {
+      clearTimeout(timeout);
+      resolve(nextTask);
+    };
+    const timeout = setTimeout(() => {
+      extensionWaiters = extensionWaiters.filter((item) => item !== waiter);
+      resolve(null);
+    }, timeoutMs);
+    extensionWaiters.push(waiter);
+  });
 }
 
 async function serveStatic(req, res) {
@@ -125,7 +157,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/task/run" && req.method === "POST") {
-      if (!["approved_waiting_for_run", "failed"].includes(task.status)) {
+      if (!["approved_waiting_for_run", "failed", "needs_manual_paste"].includes(task.status)) {
         return json(res, 409, {
           error: "Task must be approved before it can run.",
           task: publicTask(),
@@ -135,15 +167,17 @@ const server = createServer(async (req, res) => {
         { status: "approved_waiting_for_extension" },
         "Task released to browser extension.",
       );
+      wakeExtensionWaiters();
       return json(res, 200, { task: publicTask() });
     }
 
     if (url.pathname === "/api/extension/next-task" && req.method === "GET") {
-      if (task.status !== "approved_waiting_for_extension") {
-        return json(res, 200, { task: null });
-      }
-      updateTask({ status: "claimed_by_extension" }, "Extension claimed task.");
-      return json(res, 200, { task });
+      return json(res, 200, { task: claimExtensionTask() });
+    }
+
+    if (url.pathname === "/api/extension/wait-task" && req.method === "GET") {
+      const nextTask = await waitForExtensionTask();
+      return json(res, 200, { task: nextTask });
     }
 
     if (url.pathname === "/api/extension/events" && req.method === "POST") {
@@ -151,8 +185,9 @@ const server = createServer(async (req, res) => {
       const status = typeof body.status === "string" ? body.status : undefined;
       const message =
         typeof body.message === "string" ? body.message : "Extension update.";
+      const detail = compactDetail(body.detail);
       events = [
-        event("extension", message, { status, detail: body.detail }),
+        event("extension", message, { status, detail }),
         ...events,
       ].slice(0, 50);
       if (status) task = { ...task, status, updatedAt: new Date().toISOString() };
@@ -166,6 +201,22 @@ const server = createServer(async (req, res) => {
     });
   }
 });
+
+function compactDetail(detail) {
+  if (!detail || typeof detail !== "object") return detail;
+  if (!detail.debug) return detail;
+
+  return {
+    ...detail,
+    debug: {
+      url: detail.debug.url,
+      title: detail.debug.title,
+      activeElement: detail.debug.activeElement,
+      visibleCandidateCount: detail.debug.visibleCandidateCount,
+      visibleCandidates: detail.debug.visibleCandidates,
+    },
+  };
+}
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`Penut Operator prototype running at http://127.0.0.1:${PORT}`);
