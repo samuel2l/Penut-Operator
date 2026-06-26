@@ -1,4 +1,4 @@
 node_modules/
+data/
 .DS_Store
-*.log
-desktop/state.json
+npm-debug.log*
