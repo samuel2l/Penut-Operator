@@ -71,6 +71,10 @@ approveBtn.addEventListener("click", async () => {
 runBtn.addEventListener("click", async () => {
   const result = await window.penutOperator.runAgent();
   if (result.task) render(result.task);
+  if (!result.ok && result.error) {
+    statusBadge.textContent = result.error;
+    statusBadge.className = "badge failed";
+  }
 });
 
 stopBtn.addEventListener("click", async () => {

@@ -6,6 +6,7 @@ const taskStore = createTaskStore();
 const task = await taskStore.getActiveTask();
 
 const runtime = new OperatorAgentRuntime({
+  allowDryRun: dryRun,
   onEvent: async (event) => {
     const line = `[${event.type}] ${event.message}`;
     console.log(line);

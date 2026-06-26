@@ -38,6 +38,24 @@ For a non-UI smoke test:
 npm run agent:dry-run
 ```
 
+## Chrome Setup For Real Browser Control
+
+The desktop app now controls the user's normal Chrome app on macOS through Apple Events. It does not require a separate Chrome profile or a remote-debugging port.
+
+Before running browser actions, enable this Chrome setting once:
+
+```text
+Chrome > View > Developer > Allow JavaScript from Apple Events
+```
+
+Then start Operator:
+
+```bash
+npm run dev
+```
+
+When macOS asks for automation permissions, approve them for Penut Operator/Electron. If Chrome cannot be controlled, Operator marks the task failed and writes the setup instructions into the execution log. Dry-run mode is only used by the CLI smoke test.
+
 For syntax checks:
 
 ```bash
@@ -48,7 +66,7 @@ npm run check
 
 The next implementation layer is a hybrid browser agent:
 
-- Use Playwright/CDP for structured browser control when possible.
+- Use normal Chrome via Apple Events on macOS for the first proof of concept.
 - Use DOM/accessibility state first.
 - Use screenshots only for ambiguous visual decisions and audit artifacts.
 - Keep a safety checkpoint before final send/post actions.

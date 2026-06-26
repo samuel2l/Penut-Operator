@@ -6,9 +6,9 @@ export class OperatorAgentRuntime {
   #onEvent;
   #browser;
 
-  constructor({ onEvent }) {
+  constructor({ onEvent, allowDryRun = false }) {
     this.#onEvent = onEvent;
-    this.#browser = new ChromeController({ onEvent });
+    this.#browser = new ChromeController({ onEvent, allowDryRun });
   }
 
   stop() {

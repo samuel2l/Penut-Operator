@@ -65,6 +65,7 @@ ipcMain.handle("agent:run", async () => {
   }
 
   const runtime = new OperatorAgentRuntime({
+    allowDryRun: false,
     onEvent: async (event) => {
       const updatedTask = await taskStore.appendEvent(event);
       mainWindow?.webContents.send("tasks:changed", updatedTask);
@@ -80,6 +81,14 @@ ipcMain.handle("agent:run", async () => {
     const status = result.ok ? "draft_ready" : "failed";
     const updatedTask = await taskStore.updateActiveTask({ status });
     return { ...result, task: updatedTask };
+  } catch (error) {
+    await taskStore.appendEvent({
+      type: "agent",
+      message: error.message,
+      detail: { failed: true },
+    });
+    const updatedTask = await taskStore.updateActiveTask({ status: "failed" });
+    return { ok: false, error: error.message, task: updatedTask };
   } finally {
     activeRun = null;
     mainWindow?.webContents.send("tasks:changed", await taskStore.getActiveTask());
