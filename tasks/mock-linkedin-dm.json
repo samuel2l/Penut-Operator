@@ -7,10 +7,10 @@
   "requestedBy": "Penut Agent",
   "accountOwner": "Supervisor A",
   "target": {
-    "name": "Kelvin Fiador",
-    "profileUrl": "https://www.linkedin.com/in/kelvin-fiador-1258203b1/"
+    "name": "Felix Azaglo",
+    "profileUrl": "https://www.linkedin.com/in/miriblum/"
   },
-  "messageDraft": "Hey Kelvin, I came across your profile and thought your work was interesting. Curious to connect and learn more about what you are building.",
+  "messageDraft": "Hey Azaglo, I came across your profile and thought your work was interesting. Curious to connect and learn more about what you are building.",
   "sendMode": "prepare_only",
   "context": "Prototype task for Batch 1. The extension should open the profile, prepare the DM, and pause before final send.",
   "createdAt": "2026-06-25T00:00:00.000Z"
