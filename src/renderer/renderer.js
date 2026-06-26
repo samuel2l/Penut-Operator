@@ -45,6 +45,9 @@ function render(task) {
 }
 
 async function refresh() {
+  if (!window.penutOperator) {
+    throw new Error("Operator preload did not initialize.");
+  }
   render(await window.penutOperator.getTask());
 }
 
@@ -75,7 +78,7 @@ stopBtn.addEventListener("click", async () => {
   if (result.task) render(result.task);
 });
 
-window.penutOperator.onTaskChanged(render);
+if (window.penutOperator) window.penutOperator.onTaskChanged(render);
 refresh().catch((error) => {
   statusBadge.textContent = error.message;
   statusBadge.className = "badge failed";
