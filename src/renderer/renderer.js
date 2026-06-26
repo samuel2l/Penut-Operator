@@ -4,37 +4,85 @@ const eventList = document.querySelector("#eventList");
 const saveBtn = document.querySelector("#saveBtn");
 const resetBtn = document.querySelector("#resetBtn");
 const approveBtn = document.querySelector("#approveBtn");
-const runBtn = document.querySelector("#runBtn");
 const stopBtn = document.querySelector("#stopBtn");
 
 function humanStatus(status) {
   return String(status || "unknown").replaceAll("_", " ");
 }
 
+function readableStatus(status) {
+  const normalized = String(status || "unknown");
+  const map = {
+    draft: "Draft",
+    pending: "Waiting for approval",
+    approved: "Approved",
+    running: "Working",
+    completed: "Completed",
+    failed: "Needs attention",
+    stopped: "Stopped",
+  };
+  return map[normalized] || humanStatus(status);
+}
+
+function timeAgo(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const diff = Date.now() - date.getTime();
+  const mins = Math.round(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  return `${days}d ago`;
+}
+
+function friendlyEventMessage(event) {
+  const map = {
+    "Operator run started.": "Task started",
+    "Observed browser page.": "Page opened",
+    "Operator run stopped by user.": "Stopped by you",
+    "Loaded sample browser task seed.": "Loaded sample task",
+  };
+  return map[event?.message] || event?.message || "Update";
+}
+
+function friendlyEventDetail(event) {
+  const detail = event?.detail;
+  if (!detail || typeof detail !== "object") return "";
+  if (detail.error) return String(detail.error);
+  if (detail.reason) return String(detail.reason);
+  if (detail.url) return `Page: ${detail.url}`;
+  if (detail.action) return `Action: ${detail.action}`;
+  if (detail.rejectedAction) return `Rejected: ${detail.rejectedAction}`;
+  if (detail.rejectionCount) return `Rejected ${detail.rejectionCount} time(s)`;
+  return "";
+}
+
 function render(task) {
   taskPrompt.value = task.prompt || "";
-  statusBadge.textContent = humanStatus(task.status);
+  statusBadge.textContent = readableStatus(task.status);
   statusBadge.className = `badge ${task.status}`;
 
   const canEdit = ["pending", "approved", "failed", "stopped"].includes(task.status);
   taskPrompt.disabled = !canEdit;
   saveBtn.disabled = !canEdit;
-  approveBtn.disabled = task.status !== "pending";
-  runBtn.disabled = !["approved", "failed"].includes(task.status);
+  approveBtn.disabled = !["pending", "failed", "stopped"].includes(task.status);
   stopBtn.disabled = task.status !== "running";
 
   eventList.replaceChildren(
     ...(task.events || []).map((event) => {
       const item = document.createElement("li");
+      const row = document.createElement("div");
       const message = document.createElement("p");
       const time = document.createElement("time");
       const detail = document.createElement("small");
 
-      message.textContent = event.message;
-      time.textContent = new Date(event.at).toLocaleString();
-      detail.textContent = event.detail ? JSON.stringify(event.detail) : "";
+      message.textContent = friendlyEventMessage(event);
+      time.textContent = timeAgo(new Date(event.at));
+      detail.textContent = friendlyEventDetail(event);
 
-      item.append(message, time);
+      row.append(message, time);
+      item.append(row);
       if (detail.textContent) item.append(detail);
       return item;
     }),
@@ -61,10 +109,8 @@ resetBtn.addEventListener("click", async () => {
 });
 
 approveBtn.addEventListener("click", async () => {
-  render(await window.penutOperator.approveTask());
-});
-
-runBtn.addEventListener("click", async () => {
+  const approved = await window.penutOperator.approveTask();
+  render(approved);
   const result = await window.penutOperator.runAgent();
   if (result.task) render(result.task);
   if (!result.ok && result.error) {

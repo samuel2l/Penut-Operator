@@ -26,8 +26,8 @@
       <section class="workspace">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Pending browser task</p>
-            <h1>Approve local computer use</h1>
+            <p class="eyebrow">Task ready</p>
+            <h1>Review and run</h1>
           </div>
           <span id="statusBadge" class="badge">Loading</span>
         </header>
@@ -36,27 +36,26 @@
           <article class="panel">
             <div class="section-title">
               <h2>Task</h2>
-              <p>Operator will use your normal Chrome session after approval.</p>
+              <p>Edit the request, then approve it to let the agent get to work.</p>
             </div>
 
             <label class="field">
-              <span>Plain-language request</span>
+              <span>What should happen?</span>
               <textarea id="taskPrompt" rows="5"></textarea>
             </label>
 
             <div class="actions">
               <button id="saveBtn" class="secondary">Save</button>
               <button id="resetBtn" class="secondary">Reset</button>
-              <button id="approveBtn">Approve</button>
-              <button id="runBtn" class="primary">Run Operator</button>
+              <button id="approveBtn" class="primary">Approve</button>
               <button id="stopBtn" class="danger">Stop</button>
             </div>
           </article>
 
           <aside class="panel">
             <div class="section-title">
-              <h2>Execution Log</h2>
-              <p>Every browser action should be visible and auditable.</p>
+              <h2>Activity</h2>
+              <p>A simple history of what the agent did and how far it got.</p>
             </div>
             <ol id="eventList" class="events"></ol>
           </aside>

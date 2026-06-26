@@ -224,17 +224,33 @@ button.danger {
   display: grid;
   gap: 10px;
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
+  list-style: none;
+}
+
+.events li {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px 14px;
+}
+
+.events li > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .events p {
-  margin: 0 0 2px;
+  margin: 0;
+  font-weight: 600;
 }
 
 .events small {
   display: block;
-  margin-top: 4px;
+  margin-top: 6px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
   overflow-wrap: anywhere;
 }
