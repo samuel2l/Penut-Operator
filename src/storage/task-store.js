@@ -42,7 +42,7 @@ async function resetActiveTask() {
     events: [
       makeEvent({
         type: "system",
-        message: "Loaded sample browser task.",
+        message: "Loaded sample browser task seed.",
       }),
     ],
   };

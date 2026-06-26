@@ -1,9 +1,9 @@
 {
-  "id": "task_sample_linkedin_dm_001",
+  "id": "task_sample_browser_task_001",
   "status": "pending",
   "requestedBy": "Penut Agent",
   "accountOwner": "Account owner",
-  "prompt": "Send a LinkedIn DM to Emmanuel Penkra about the new Penut demo. Draft the message and pause before clicking Send.",
+  "prompt": "Open the target page, prepare the requested message or action, and pause before the final send step.",
   "createdAt": "2026-06-26T00:00:00.000Z",
   "events": []
 }

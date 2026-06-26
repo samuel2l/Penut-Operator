@@ -178,7 +178,7 @@ class DryRunActionPlanner {
     return {
       action: BrowserActions.OpenUrl,
       reason: "Dry-run planner would start by opening the relevant site.",
-      url: "https://www.linkedin.com",
+      url: "https://example.com",
       elementId: "",
       text: "",
       key: "",
