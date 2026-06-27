@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,7 +19,12 @@ export function createTaskStore() {
 
 async function getActiveTask() {
   await ensureTaskFile();
-  return JSON.parse(await readFile(TASK_FILE, "utf8"));
+  const raw = await readFile(TASK_FILE, "utf8");
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    return resetActiveTask();
+  }
 }
 
 async function updateActiveTask(patch) {
@@ -63,7 +68,8 @@ async function appendEvent(event) {
 
 async function ensureTaskFile() {
   try {
-    await readFile(TASK_FILE, "utf8");
+    const raw = await readFile(TASK_FILE, "utf8");
+    JSON.parse(raw);
   } catch {
     await resetActiveTask();
   }
@@ -71,7 +77,14 @@ async function ensureTaskFile() {
 
 async function writeTask(task) {
   await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(TASK_FILE, `${JSON.stringify(task, null, 2)}\n`);
+  const tempFile = `${TASK_FILE}.tmp`;
+  await writeFile(tempFile, `${JSON.stringify(task, null, 2)}\n`);
+  try {
+    await rename(tempFile, TASK_FILE);
+  } catch (error) {
+    await unlink(tempFile).catch(() => {});
+    throw error;
+  }
 }
 
 function makeEvent(event) {

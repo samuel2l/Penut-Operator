@@ -37,6 +37,12 @@ Create a local `.env` file before running the real AI operator:
 ```bash
 OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4.1-mini
+
+Python browser-use worker:
+
+pip install -r python/requirements.txt
+
+The worker reuses `OPENAI_API_KEY` and `OPENAI_MODEL` from the environment.
 ```
 
 For a non-UI smoke test:

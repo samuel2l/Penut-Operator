@@ -58,12 +58,13 @@ export class AIActionPlanner {
     this.#client = client;
   }
 
-  async nextAction({ task, observation, history }) {
+  async nextAction({ task, taskContext, observation, history }) {
     return this.#client.createJsonResponse({
       instructions: buildInstructions(),
       input: JSON.stringify({
         task: {
           prompt: task.prompt,
+          intent: taskContext?.intent || null,
         },
         observation: compactObservation(observation),
         recentHistory: history.slice(-8),
@@ -81,6 +82,11 @@ function buildInstructions() {
     "Recent history may include rejected actions. Do not repeat rejected actions; choose a different route.",
     "Prefer visible on-page controls over guessing.",
     "If the page is not the right site, use open_url.",
+    "Use the task intent to separate similar-looking jobs.",
+    "If the intent is comment, stay on the post and look for comment, reply, or text box controls near the content. Do not open inbox, direct message, or messaging surfaces unless the prompt explicitly asks for a DM.",
+    "If the intent is comment and a visible textbox or editor looks like a comment field or reply field, use it directly before clicking any secondary action buttons such as Share.",
+    "If the intent is dm, prefer compose or direct message surfaces. Do not use a comment box as a substitute for a DM.",
+    "If the intent is reply, prefer the reply surface that matches the content type.",
     "For a task addressed to a specific person, prefer opening/searching that person's profile or a direct compose page over opening a generic inbox. A direct search URL is acceptable.",
     "Do not assume the currently selected inbox thread is the intended recipient unless the visible page clearly shows the recipient name.",
     "Do not call open_url for the current page or a URL already opened in recentHistory. If the page is already correct, interact with it.",
@@ -90,6 +96,7 @@ function buildInstructions() {
     "Do not type drafted messages into search boxes, global search fields, browser navigation fields, or site navigation fields.",
     "When a recipient/name autocomplete appears, choose the matching suggestion before typing a message body.",
     "Do not use a global navigation link, such as Messaging/Inbox, as a substitute for a page-specific Message/Compose control unless the task explicitly asks to open the inbox.",
+    "For Instagram comment tasks, avoid Share, Send to, or similar repost/share controls unless the prompt explicitly asks to share the post.",
     "If you click an element and the page does not change, choose a different element, scroll, or fail. Do not repeat the same click.",
     "Follow the user's instruction literally: if they ask to send/post/reply, complete the final action; if they ask to draft, prepare, review, pause, or not send, use pause_for_user before the final action.",
     "Only use pause_for_user when the user requested review/pause/prepare-only behavior, when the requested draft is visibly placed in a plausible composer/editor, or when you are blocked and need user input.",

@@ -45,8 +45,20 @@ export class OperatorAgentRuntime {
         elementCount: observation.elements.length,
       });
 
-      const decision = await this.#planner.nextAction({ task, observation, history });
-      const validDecision = validateDecisionOrReject(decision, observation, history, task);
+      const taskContext = buildTaskContext(task);
+      const decision = await this.#planner.nextAction({
+        task,
+        taskContext,
+        observation,
+        history,
+      });
+      const validDecision = validateDecisionOrReject(
+        decision,
+        observation,
+        history,
+        task,
+        taskContext,
+      );
       if (validDecision.action === "rejected") {
         const rejectionCount = history.filter((entry) => entry.action === "rejected").length + 1;
         await this.#emit("agent", validDecision.reason, {
@@ -188,9 +200,9 @@ class DryRunActionPlanner {
   }
 }
 
-function validateDecisionOrReject(decision, observation, history, task) {
+function validateDecisionOrReject(decision, observation, history, task, taskContext) {
   try {
-    return validateDecision(decision, observation, history, task);
+    return validateDecision(decision, observation, history, task, taskContext);
   } catch (error) {
     return {
       action: "rejected",
@@ -199,7 +211,7 @@ function validateDecisionOrReject(decision, observation, history, task) {
   }
 }
 
-function validateDecision(decision, observation, history, task) {
+function validateDecision(decision, observation, history, task, taskContext) {
   if (!decision || typeof decision !== "object") {
     throw new Error("AI planner returned an invalid action.");
   }
@@ -245,9 +257,21 @@ function validateDecision(decision, observation, history, task) {
     );
   }
 
-  if (decision.action === BrowserActions.ClickElement && badGenericInboxClick(targetElement, task)) {
+  if (
+    decision.action === BrowserActions.ClickElement &&
+    badGenericInboxClick(targetElement, taskContext)
+  ) {
     throw new Error(
-      `AI planner tried to open generic inbox navigation for a person-specific message task: "${targetElement.label}".`,
+      `AI planner tried to open generic inbox navigation for a task that should stay on the post/comment surface: "${targetElement.label}".`,
+    );
+  }
+
+  if (
+    decision.action === BrowserActions.ClickElement &&
+    badCommentShareClick(targetElement, taskContext, observation)
+  ) {
+    throw new Error(
+      `AI planner tried to open a share/send surface while the task intent is comment: "${targetElement.label}".`,
     );
   }
 
@@ -263,17 +287,37 @@ function validateDecision(decision, observation, history, task) {
   return decision;
 }
 
-function badGenericInboxClick(element, task) {
-  const prompt = task.prompt || "";
+function badGenericInboxClick(element, taskContext) {
+  const prompt = taskContext?.prompt || "";
+  const intent = taskContext?.intent?.kind || "unknown";
+
+  const label = element?.label || "";
+  const isInboxLike = /\b(messaging|messages|inbox|direct|dm)\b/i.test(label);
+  if (!isInboxLike) return false;
+
+  if (intent === "comment") return true;
   if (!/\b(dm|message|send)\b/i.test(prompt)) return false;
   if (!/\b(to|for)\s+[A-Z][\p{L}'-]+/u.test(prompt)) return false;
 
-  const label = element?.label || "";
-  if (!/\b(messaging|messages|inbox)\b/i.test(label)) return false;
   return !personNameFromPrompt(prompt)
     .toLowerCase()
     .split(/\s+/)
     .some((part) => part && label.toLowerCase().includes(part));
+}
+
+function badCommentShareClick(element, taskContext, observation) {
+  if (taskContext?.intent?.kind !== "comment") return false;
+
+  const label = element?.label || "";
+  if (!/\b(share|send to|repost|send)\b/i.test(label)) return false;
+
+  const visibleCommentField = (observation?.elements || []).some((candidate) => {
+    if (!candidate.editable) return false;
+    const candidateLabel = candidate.label || "";
+    return /\b(comment|reply|add a comment)\b/i.test(candidateLabel);
+  });
+
+  return visibleCommentField || /\b(share|send to)\b/i.test(label);
 }
 
 function personNameFromPrompt(prompt) {
@@ -337,4 +381,42 @@ function summarizeText(text) {
   if (!text) return "";
   const value = String(text);
   return value.length > 180 ? `${value.slice(0, 177)}...` : value;
+}
+
+function buildTaskContext(task) {
+  const prompt = task?.prompt || "";
+  return {
+    prompt,
+    intent: inferTaskIntent(prompt),
+  };
+}
+
+function inferTaskIntent(prompt) {
+  const normalized = String(prompt || "").toLowerCase();
+
+  if (/\b(comment|commenting|leave a comment)\b/.test(normalized)) {
+    return { kind: "comment" };
+  }
+
+  if (/\b(reply to|replying|respond to|responde? to|answer\b)/.test(normalized)) {
+    return { kind: "reply" };
+  }
+
+  if (/\b(dm|direct message|message|send a message|send message)\b/.test(normalized)) {
+    return { kind: "dm" };
+  }
+
+  if (/\b(post|publish|share)\b/.test(normalized)) {
+    return { kind: "post" };
+  }
+
+  if (/\b(follow|unfollow|like|save)\b/.test(normalized)) {
+    return { kind: "engagement" };
+  }
+
+  if (/\b(search|find|look up|inspect|view|open)\b/.test(normalized)) {
+    return { kind: "browse" };
+  }
+
+  return { kind: "unknown" };
 }

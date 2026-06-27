@@ -5,6 +5,7 @@ const saveBtn = document.querySelector("#saveBtn");
 const resetBtn = document.querySelector("#resetBtn");
 const approveBtn = document.querySelector("#approveBtn");
 const stopBtn = document.querySelector("#stopBtn");
+let runInProgress = false;
 
 function humanStatus(status) {
   return String(status || "unknown").replaceAll("_", " ");
@@ -51,6 +52,10 @@ function friendlyEventDetail(event) {
   if (!detail || typeof detail !== "object") return "";
   if (detail.error) return String(detail.error);
   if (detail.reason) return String(detail.reason);
+  if (typeof detail.ms === "number" && typeof detail.totalMs === "number") {
+    return `Run time: ${Math.round(detail.ms / 1000 * 10) / 10}s, total: ${Math.round(detail.totalMs / 1000 * 10) / 10}s`;
+  }
+  if (typeof detail.ms === "number") return `Took ${Math.round(detail.ms / 1000 * 10) / 10}s`;
   if (detail.url) return `Page: ${detail.url}`;
   if (detail.action) return `Action: ${detail.action}`;
   if (detail.rejectedAction) return `Rejected: ${detail.rejectedAction}`;
@@ -109,13 +114,19 @@ resetBtn.addEventListener("click", async () => {
 });
 
 approveBtn.addEventListener("click", async () => {
-  const approved = await window.penutOperator.approveTask();
-  render(approved);
-  const result = await window.penutOperator.runAgent();
-  if (result.task) render(result.task);
-  if (!result.ok && result.error) {
-    statusBadge.textContent = result.error;
-    statusBadge.className = "badge failed";
+  if (runInProgress) return;
+  runInProgress = true;
+  approveBtn.disabled = true;
+  try {
+    const result = await window.penutOperator.runAgent();
+    if (result.task) render(result.task);
+    if (!result.ok && result.error) {
+      statusBadge.textContent = result.error;
+      statusBadge.className = "badge failed";
+    }
+  } finally {
+    runInProgress = false;
+    render(await window.penutOperator.getTask());
   }
 });
 
