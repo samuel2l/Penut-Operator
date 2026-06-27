@@ -1,11 +1,12 @@
 const taskPrompt = document.querySelector("#taskPrompt");
 const statusBadge = document.querySelector("#statusBadge");
 const eventList = document.querySelector("#eventList");
-const saveBtn = document.querySelector("#saveBtn");
 const resetBtn = document.querySelector("#resetBtn");
 const approveBtn = document.querySelector("#approveBtn");
 const stopBtn = document.querySelector("#stopBtn");
 let runInProgress = false;
+let lastRenderedPrompt = "";
+let promptDirty = false;
 
 function humanStatus(status) {
   return String(status || "unknown").replaceAll("_", " ");
@@ -64,13 +65,15 @@ function friendlyEventDetail(event) {
 }
 
 function render(task) {
-  taskPrompt.value = task.prompt || "";
+  if (!promptDirty && document.activeElement !== taskPrompt) {
+    taskPrompt.value = task.prompt || "";
+    lastRenderedPrompt = taskPrompt.value;
+  }
   statusBadge.textContent = readableStatus(task.status);
   statusBadge.className = `badge ${task.status}`;
 
   const canEdit = ["pending", "approved", "failed", "stopped"].includes(task.status);
   taskPrompt.disabled = !canEdit;
-  saveBtn.disabled = !canEdit;
   approveBtn.disabled = !["pending", "failed", "stopped"].includes(task.status);
   stopBtn.disabled = task.status !== "running";
 
@@ -101,15 +104,12 @@ async function refresh() {
   render(await window.penutOperator.getTask());
 }
 
-saveBtn.addEventListener("click", async () => {
-  render(
-    await window.penutOperator.updateTask({
-      prompt: taskPrompt.value,
-    }),
-  );
+taskPrompt.addEventListener("input", () => {
+  promptDirty = true;
 });
 
 resetBtn.addEventListener("click", async () => {
+  promptDirty = false;
   render(await window.penutOperator.resetTask());
 });
 
@@ -118,7 +118,12 @@ approveBtn.addEventListener("click", async () => {
   runInProgress = true;
   approveBtn.disabled = true;
   try {
-    const result = await window.penutOperator.runAgent();
+    const prompt = taskPrompt.value.trim();
+    if (!prompt) return;
+    taskPrompt.value = prompt;
+    lastRenderedPrompt = prompt;
+    promptDirty = false;
+    const result = await window.penutOperator.runAgent(prompt);
     if (result.task) render(result.task);
     if (!result.ok && result.error) {
       statusBadge.textContent = result.error;

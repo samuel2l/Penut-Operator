@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld("penutOperator", {
   updateTask: (patch) => ipcRenderer.invoke("tasks:update", patch),
   approveTask: () => ipcRenderer.invoke("tasks:approve"),
   resetTask: () => ipcRenderer.invoke("tasks:reset"),
-  runAgent: () => ipcRenderer.invoke("agent:run"),
+  runAgent: (prompt) => ipcRenderer.invoke("agent:run", prompt),
   stopAgent: () => ipcRenderer.invoke("agent:stop"),
   onTaskChanged: (handler) => {
     const listener = (_event, task) => handler(task);

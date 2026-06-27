@@ -53,7 +53,7 @@ npm run agent:dry-run
 
 ## Chrome Setup For Real Browser Control
 
-The desktop app now controls the user's normal Chrome app on macOS through Apple Events. It does not require a separate Chrome profile or a remote-debugging port.
+The worker uses a persistent Chrome profile directory so logins can carry across runs on the same machine.
 
 Before running browser actions, enable this Chrome setting once:
 

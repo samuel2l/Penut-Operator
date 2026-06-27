@@ -1,4 +1,5 @@
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import os from "node:os";
 import readline from "node:readline";
@@ -56,16 +57,17 @@ ipcMain.handle("tasks:approve", async () => {
 
 ipcMain.handle("tasks:reset", async () => taskStore.resetActiveTask());
 
-ipcMain.handle("agent:run", async () => {
+ipcMain.handle("agent:run", async (_event, prompt) => {
   if (activeRun) {
     return { ok: false, error: "An Operator run is already active." };
   }
 
   const currentTask = await taskStore.getActiveTask();
-  const task =
-    currentTask.status === "approved" || currentTask.status === "failed"
-      ? currentTask
-      : await taskStore.updateActiveTask({ status: "approved" });
+  const cleanPrompt = String(prompt || currentTask.prompt || "").trim();
+  const task = await taskStore.updateActiveTask({
+    prompt: cleanPrompt,
+    status: "approved",
+  });
 
   activeRun = { stop: () => {} };
   await taskStore.updateActiveTask({ status: "running" });
@@ -73,8 +75,16 @@ ipcMain.handle("agent:run", async () => {
 
   try {
     const result = await runBrowserUseWorker(task, async (event) => {
-      const updatedTask = await taskStore.appendEvent(event);
-      mainWindow?.webContents.send("tasks:changed", updatedTask);
+      try {
+        const updatedTask = await taskStore.appendEvent(event);
+        mainWindow?.webContents.send("tasks:changed", updatedTask);
+      } catch (error) {
+        await taskStore.appendEvent({
+          type: "agent",
+          message: "Something went wrong while saving the activity log.",
+          detail: { error: error.message },
+        }).catch(() => {});
+      }
     });
     const status = result.ok ? "completed" : "failed";
     const updatedTask = await taskStore.updateActiveTask({ status });
@@ -104,6 +114,8 @@ ipcMain.handle("agent:stop", async () => {
 function runBrowserUseWorker(task, onEvent) {
   return new Promise((resolve, reject) => {
     const workerPath = path.join(__dirname, "../../python/browser_use_worker.py");
+    const localPythonPath = path.join(__dirname, "../../.venv/bin/python");
+    const pythonPath = existsSync(localPythonPath) ? localPythonPath : "python3";
     const browserUseTerminalBinary = path.join(os.homedir(), ".local/bin/browser-use-terminal");
     const chromeUserDataDir = path.join(
       os.homedir(),
@@ -116,7 +128,7 @@ function runBrowserUseWorker(task, onEvent) {
       BROWSER_USE_CHROME_PROFILE_DIRECTORY: "Default",
     };
     const child = execFile(
-      "python3",
+      pythonPath,
       [workerPath, task.prompt || ""],
       {
         env,
@@ -185,6 +197,10 @@ function formatWorkerLog(line, source) {
   if (/^\[BrowserSession\]/.test(normalized)) return "Browser is ready.";
   if (/^\[service\]/.test(normalized)) return "";
   if (/^INFO\s+\[/.test(normalized)) return "";
+  if (/^\(node:/.test(normalized)) return "";
+  if (/UnhandledPromiseRejectionWarning/i.test(normalized)) return "";
+  if (/Traceback/i.test(normalized)) return "";
+  if (/^at\s+/.test(normalized)) return "";
   if (source === "stderr") return friendlyWorkerLine(normalized);
   return friendlyWorkerLine(normalized);
 }
@@ -200,5 +216,6 @@ function friendlyWorkerLine(line) {
   if (/page opened/i.test(normalized)) return "Opened the page.";
   if (/task started/i.test(normalized)) return "Task started.";
   if (/stopped by you/i.test(normalized)) return "Stopped by you.";
+  if (/run time/i.test(normalized)) return "Task is moving along.";
   return normalized.replace(/\b(browser-use|worker|session|service)\b/gi, "").replace(/\s+/g, " ").trim();
 }
