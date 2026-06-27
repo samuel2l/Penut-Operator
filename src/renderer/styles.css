@@ -91,7 +91,7 @@ nav {
 }
 
 .workspace {
-  padding: 28px;
+  padding: 28px 36px;
 }
 
 .topbar {
@@ -103,7 +103,8 @@ nav {
 }
 
 .topbar h1,
-.section-title h2 {
+.section-title h2,
+.section-title h3 {
   margin: 0;
 }
 
@@ -146,21 +147,174 @@ nav {
   color: var(--green);
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.8fr);
-  gap: 18px;
+.badge.completed {
+  border-color: #abefc6;
+  background: #ecfdf3;
+  color: var(--green);
 }
 
 .panel {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--panel);
-  padding: 20px;
+  padding: 24px;
+}
+
+.task-queue,
+.task-details,
+.empty-state {
+  min-height: 520px;
+}
+
+.screen {
+  max-width: 1180px;
+}
+
+.task-details {
+  display: grid;
+  gap: 24px;
+}
+
+.task-compose {
+  min-height: 0;
+}
+
+.activity-panel {
+  min-height: 260px;
+}
+
+.settings-panel {
+  max-width: 720px;
+}
+
+.readiness-card {
+  border-top: 1px solid var(--line);
+  margin-top: 24px;
+  padding-top: 24px;
+}
+
+.empty-state {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  text-align: center;
+}
+
+.empty-state h2 {
+  margin: 0 0 8px;
+  color: var(--ink);
+}
+
+.empty-state p,
+.empty-note {
+  max-width: 460px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.hidden {
+  display: none !important;
 }
 
 .section-title {
   margin-bottom: 18px;
+}
+
+.queue-title {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-card {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  background: #ffffff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.task-card:hover:not(:disabled),
+.task-card.selected {
+  border-color: #b8c7dc;
+  background: #f8fbff;
+}
+
+.task-card strong {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.task-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.help-text {
+  margin: -4px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.readiness-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.readiness-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 13px 15px;
+}
+
+.readiness-list li > div {
+  display: grid;
+  gap: 4px;
+}
+
+.readiness-list small {
+  color: var(--muted);
+}
+
+.readiness-list span {
+  border-radius: 999px;
+  padding: 5px 8px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.readiness-list .ready span {
+  background: #ecfdf3;
+  color: var(--green);
+}
+
+.readiness-list .needs-setup span {
+  background: #fffaeb;
+  color: var(--amber);
 }
 
 .field {
@@ -182,13 +336,15 @@ textarea {
 
 textarea {
   resize: vertical;
+  min-height: 170px;
 }
 
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 16px;
+  justify-content: flex-end;
+  margin-top: 18px;
 }
 
 button {
@@ -213,16 +369,29 @@ button.secondary {
 }
 
 button.primary {
+  min-width: 132px;
   background: var(--blue);
 }
 
 button.danger {
+  min-width: 92px;
   background: var(--red);
+}
+
+button.compact {
+  padding: 7px 10px;
+}
+
+.back-button {
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--ink);
+  margin-bottom: 14px;
 }
 
 .events {
   display: grid;
-  gap: 10px;
+  gap: 9px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -230,9 +399,9 @@ button.danger {
 
 .events li {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 12px;
   background: #ffffff;
-  padding: 12px 14px;
+  padding: 13px 15px;
 }
 
 .events li > div {
@@ -253,4 +422,10 @@ button.danger {
   color: var(--muted);
   font-size: 13px;
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .workspace {
+    padding: 22px;
+  }
 }

@@ -17,9 +17,9 @@
           </div>
         </div>
         <nav>
-          <button class="nav-item active">Approvals</button>
-          <button class="nav-item" disabled>Runs</button>
-          <button class="nav-item" disabled>Settings</button>
+          <button id="approvalsNavBtn" class="nav-item active">Approvals</button>
+          <button class="nav-item" disabled>History</button>
+          <button id="settingsNavBtn" class="nav-item">Settings</button>
         </nav>
       </aside>
 
@@ -32,32 +32,87 @@
           <span id="statusBadge" class="badge">Loading</span>
         </header>
 
-        <section class="grid">
-          <article class="panel">
+        <section id="listScreen" class="screen">
+          <article class="panel task-queue">
+            <div class="section-title queue-title">
+              <div>
+                <h2>Approval tasks</h2>
+                <p>Select a task to review the details and activity.</p>
+              </div>
+              <button id="newTaskBtn" class="secondary compact">New</button>
+            </div>
+            <ol id="taskList" class="task-list"></ol>
+          </article>
+        </section>
+
+        <section id="detailScreen" class="screen hidden">
+          <button id="backBtn" class="back-button" type="button">Back to approvals</button>
+
+          <section id="taskDetails" class="task-details">
+            <article class="panel task-compose">
+              <div class="detail-heading">
+                <div class="section-title">
+                  <h2>Task details</h2>
+                  <p>Edit the request, then approve it to let the agent get to work.</p>
+                </div>
+              </div>
+
+              <label class="field">
+                <span>What should happen?</span>
+                <textarea id="taskPrompt" rows="5"></textarea>
+              </label>
+
+              <div class="actions">
+                <button id="resetBtn" class="secondary">Reset</button>
+                <button id="approveBtn" class="primary">Approve</button>
+                <button id="stopBtn" class="danger">Stop</button>
+              </div>
+            </article>
+
+            <aside class="panel activity-panel">
+              <div class="section-title">
+                <h2>Activity</h2>
+                <p>A simple history of what the agent did and how far it got.</p>
+              </div>
+              <ol id="eventList" class="events"></ol>
+              <p id="emptyActivity" class="empty-note">No activity yet. Once this task starts, updates will appear here.</p>
+            </aside>
+          </section>
+
+          <section id="emptyState" class="panel empty-state">
+            <div>
+              <h2>Select a task</h2>
+              <p>Choose a task from the list to review it, edit it, approve it, or see what happened during the run.</p>
+            </div>
+          </section>
+        </section>
+
+        <section id="settingsScreen" class="screen hidden">
+          <article class="panel settings-panel">
             <div class="section-title">
-              <h2>Task</h2>
-              <p>Edit the request, then approve it to let the agent get to work.</p>
+              <h2>Browser setup</h2>
+              <p>Choose the Chrome profile Operator should use when it runs approved tasks.</p>
             </div>
 
             <label class="field">
-              <span>What should happen?</span>
-              <textarea id="taskPrompt" rows="5"></textarea>
+              <span>Chrome profile</span>
+              <select id="chromeProfileSelect"></select>
             </label>
 
+            <p id="profileHelp" class="help-text"></p>
+
             <div class="actions">
-              <button id="resetBtn" class="secondary">Reset</button>
-              <button id="approveBtn" class="primary">Approve</button>
-              <button id="stopBtn" class="danger">Stop</button>
+              <button id="saveSettingsBtn" class="primary">Save profile</button>
+            </div>
+
+            <div class="readiness-card">
+              <div class="section-title">
+                <h3>Run readiness</h3>
+                <p>Operator checks these before it starts a browser task.</p>
+              </div>
+              <ol id="readinessList" class="readiness-list"></ol>
             </div>
           </article>
-
-          <aside class="panel">
-            <div class="section-title">
-              <h2>Activity</h2>
-              <p>A simple history of what the agent did and how far it got.</p>
-            </div>
-            <ol id="eventList" class="events"></ol>
-          </aside>
         </section>
       </section>
     </main>

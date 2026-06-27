@@ -1,12 +1,33 @@
 const taskPrompt = document.querySelector("#taskPrompt");
 const statusBadge = document.querySelector("#statusBadge");
 const eventList = document.querySelector("#eventList");
+const listScreen = document.querySelector("#listScreen");
+const detailScreen = document.querySelector("#detailScreen");
+const settingsScreen = document.querySelector("#settingsScreen");
+const taskDetails = document.querySelector("#taskDetails");
+const emptyState = document.querySelector("#emptyState");
+const emptyActivity = document.querySelector("#emptyActivity");
+const taskList = document.querySelector("#taskList");
+const newTaskBtn = document.querySelector("#newTaskBtn");
+const backBtn = document.querySelector("#backBtn");
+const approvalsNavBtn = document.querySelector("#approvalsNavBtn");
+const settingsNavBtn = document.querySelector("#settingsNavBtn");
+const chromeProfileSelect = document.querySelector("#chromeProfileSelect");
+const profileHelp = document.querySelector("#profileHelp");
+const saveSettingsBtn = document.querySelector("#saveSettingsBtn");
+const readinessList = document.querySelector("#readinessList");
 const resetBtn = document.querySelector("#resetBtn");
 const approveBtn = document.querySelector("#approveBtn");
 const stopBtn = document.querySelector("#stopBtn");
 let runInProgress = false;
 let lastRenderedPrompt = "";
 let promptDirty = false;
+let currentState;
+let selectedTaskId;
+let currentScreen = "list";
+let currentSettings;
+let chromeProfileData = { userDataDir: "", profiles: [] };
+let currentReadiness = { ready: false, checks: [] };
 
 function humanStatus(status) {
   return String(status || "unknown").replaceAll("_", " ");
@@ -64,21 +85,96 @@ function friendlyEventDetail(event) {
   return "";
 }
 
-function render(task) {
-  if (!promptDirty && document.activeElement !== taskPrompt) {
+function selectedTask(state) {
+  return state?.tasks?.find((task) => task.id === state.selectedTaskId) || state?.tasks?.[0];
+}
+
+function taskPreview(task) {
+  const prompt = String(task?.prompt || "").trim();
+  if (!prompt) return "Untitled task";
+  return prompt.length > 72 ? `${prompt.slice(0, 69)}...` : prompt;
+}
+
+function setScreen(screen) {
+  currentScreen = screen;
+  approvalsNavBtn.classList.toggle("active", screen !== "settings");
+  settingsNavBtn.classList.toggle("active", screen === "settings");
+}
+
+function render(state) {
+  currentState = state;
+  const task = selectedTask(state);
+  const isSettings = currentScreen === "settings";
+  const isDetail = currentScreen === "detail";
+  settingsScreen.classList.toggle("hidden", !isSettings);
+  listScreen.classList.toggle("hidden", isDetail || isSettings);
+  detailScreen.classList.toggle("hidden", !isDetail || isSettings);
+
+  if (!task) {
+    taskDetails.classList.add("hidden");
+    emptyState.classList.toggle("hidden", !isDetail);
+    statusBadge.textContent = "No tasks";
+    statusBadge.className = "badge";
+    return;
+  }
+  selectedTaskId = task.id;
+  const anyRunning = (state.tasks || []).some((item) => item.status === "running");
+
+  taskDetails.classList.toggle("hidden", !isDetail);
+  emptyState.classList.add("hidden");
+
+  if (!isDetail) {
+    statusBadge.textContent = isSettings
+      ? profileStatusText()
+      : `${state.tasks?.length || 0} task${state.tasks?.length === 1 ? "" : "s"}`;
+    statusBadge.className = "badge";
+  } else {
+    statusBadge.textContent = readableStatus(task.status);
+    statusBadge.className = `badge ${task.status}`;
+  }
+
+  if (isDetail && !promptDirty && document.activeElement !== taskPrompt) {
     taskPrompt.value = task.prompt || "";
     lastRenderedPrompt = taskPrompt.value;
   }
-  statusBadge.textContent = readableStatus(task.status);
-  statusBadge.className = `badge ${task.status}`;
 
   const canEdit = ["pending", "approved", "failed", "stopped"].includes(task.status);
   taskPrompt.disabled = !canEdit;
-  approveBtn.disabled = !["pending", "failed", "stopped"].includes(task.status);
+  approveBtn.disabled = anyRunning || !["pending", "failed", "stopped"].includes(task.status);
   stopBtn.disabled = task.status !== "running";
+  newTaskBtn.disabled = anyRunning;
+  resetBtn.disabled = anyRunning;
 
+  taskList.replaceChildren(
+    ...(state.tasks || []).map((item) => {
+      const li = document.createElement("li");
+      const button = document.createElement("button");
+      const title = document.createElement("strong");
+      const meta = document.createElement("span");
+
+      button.type = "button";
+      button.className = "task-card";
+      title.textContent = taskPreview(item);
+      meta.textContent = `${readableStatus(item.status)} · ${timeAgo(new Date(item.updatedAt || item.createdAt))}`;
+      button.append(title, meta);
+      button.addEventListener("click", async () => {
+        setScreen("detail");
+        promptDirty = false;
+        if (item.id === selectedTaskId) {
+          render(currentState);
+          return;
+        }
+        render(await window.penutOperator.selectTask(item.id));
+      });
+      li.append(button);
+      return li;
+    }),
+  );
+
+  const events = task.events || [];
+  emptyActivity.classList.toggle("hidden", events.length > 0);
   eventList.replaceChildren(
-    ...(task.events || []).map((event) => {
+    ...events.map((event) => {
       const item = document.createElement("li");
       const row = document.createElement("div");
       const message = document.createElement("p");
@@ -97,10 +193,60 @@ function render(task) {
   );
 }
 
+function renderSettings(settingsPayload) {
+  currentSettings = settingsPayload.settings;
+  chromeProfileData = settingsPayload.chromeProfiles;
+  currentReadiness = settingsPayload.readiness || { ready: false, checks: [] };
+  const profiles = chromeProfileData.profiles || [];
+
+  chromeProfileSelect.replaceChildren(
+    ...profiles.map((profile) => {
+      const option = document.createElement("option");
+      option.value = profile.directory;
+      option.textContent = profile.email ? `${profile.name} (${profile.email})` : profile.name;
+      return option;
+    }),
+  );
+
+  if (currentSettings.chromeProfileDirectory) {
+    chromeProfileSelect.value = currentSettings.chromeProfileDirectory;
+  }
+
+  chromeProfileSelect.disabled = profiles.length === 0;
+  saveSettingsBtn.disabled = profiles.length === 0;
+  profileHelp.textContent = profiles.length
+    ? `Operator will use Chrome profile data from ${chromeProfileData.userDataDir}.`
+    : "No Chrome profiles were found on this computer.";
+
+  readinessList.replaceChildren(
+    ...currentReadiness.checks.map((check) => {
+      const item = document.createElement("li");
+      const state = document.createElement("span");
+      const body = document.createElement("div");
+      const label = document.createElement("strong");
+      const message = document.createElement("small");
+
+      item.className = check.ready ? "ready" : "needs-setup";
+      state.textContent = check.ready ? "Ready" : "Needs setup";
+      label.textContent = check.label;
+      message.textContent = check.message;
+      body.append(label, message);
+      item.append(body, state);
+      return item;
+    }),
+  );
+}
+
+function profileStatusText() {
+  if (!currentSettings?.chromeProfileDirectory) return "Setup needed";
+  return currentSettings.chromeProfileName || currentSettings.chromeProfileDirectory;
+}
+
 async function refresh() {
   if (!window.penutOperator) {
     throw new Error("Operator preload did not initialize.");
   }
+  renderSettings(await window.penutOperator.getSettings());
   render(await window.penutOperator.getTask());
 }
 
@@ -111,6 +257,43 @@ taskPrompt.addEventListener("input", () => {
 resetBtn.addEventListener("click", async () => {
   promptDirty = false;
   render(await window.penutOperator.resetTask());
+});
+
+newTaskBtn.addEventListener("click", async () => {
+  setScreen("detail");
+  promptDirty = false;
+  render(await window.penutOperator.createTask(""));
+  taskPrompt.focus();
+});
+
+backBtn.addEventListener("click", () => {
+  setScreen("list");
+  promptDirty = false;
+  render(currentState);
+});
+
+approvalsNavBtn.addEventListener("click", () => {
+  setScreen("list");
+  promptDirty = false;
+  render(currentState);
+});
+
+settingsNavBtn.addEventListener("click", async () => {
+  setScreen("settings");
+  renderSettings(await window.penutOperator.getSettings());
+  render(currentState);
+});
+
+saveSettingsBtn.addEventListener("click", async () => {
+  const directory = chromeProfileSelect.value;
+  const profile = (chromeProfileData.profiles || []).find((item) => item.directory === directory);
+  renderSettings(await window.penutOperator.updateSettings({
+    chromeUserDataDir: chromeProfileData.userDataDir,
+    chromeProfileDirectory: directory,
+    chromeProfileName: profile?.name || directory,
+  }));
+  statusBadge.textContent = "Profile saved";
+  statusBadge.className = "badge completed";
 });
 
 approveBtn.addEventListener("click", async () => {
@@ -124,10 +307,15 @@ approveBtn.addEventListener("click", async () => {
     lastRenderedPrompt = prompt;
     promptDirty = false;
     const result = await window.penutOperator.runAgent(prompt);
-    if (result.task) render(result.task);
+    if (result.state) render(result.state);
     if (!result.ok && result.error) {
       statusBadge.textContent = result.error;
       statusBadge.className = "badge failed";
+      if (/before running tasks|setup|install|model access/i.test(result.error)) {
+        setScreen("settings");
+        renderSettings(await window.penutOperator.getSettings());
+        render(currentState);
+      }
     }
   } finally {
     runInProgress = false;
@@ -137,7 +325,7 @@ approveBtn.addEventListener("click", async () => {
 
 stopBtn.addEventListener("click", async () => {
   const result = await window.penutOperator.stopAgent();
-  if (result.task) render(result.task);
+  if (result.state) render(result.state);
 });
 
 if (window.penutOperator) window.penutOperator.onTaskChanged(render);

@@ -9,7 +9,7 @@
     "dev": "ELECTRON_RUN_AS_NODE= electron .",
     "start": "ELECTRON_RUN_AS_NODE= electron .",
     "agent:dry-run": "node src/agent/cli.js --dry-run",
-    "check": "node --check src/main/main.js && node --check src/main/preload.cjs && node --check src/agent/ai/openai-client.js && node --check src/agent/ai/action-planner.js && node --check src/agent/browser-actions.js && node --check src/agent/cli.js && node --check src/agent/runtime.js && node --check src/browser/chrome-controller.js && node --check src/storage/task-store.js"
+    "check": "node --check src/main/main.js && node --check src/main/preload.cjs && node --check src/renderer/renderer.js && node --check src/agent/ai/openai-client.js && node --check src/agent/ai/action-planner.js && node --check src/agent/browser-actions.js && node --check src/agent/cli.js && node --check src/agent/runtime.js && node --check src/browser/chrome-controller.js && node --check src/storage/task-store.js && node --check src/storage/settings-store.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
