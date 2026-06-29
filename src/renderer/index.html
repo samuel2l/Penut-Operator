@@ -39,6 +39,7 @@
                 <h2>Approval tasks</h2>
                 <p>Select a task to review the details and activity.</p>
               </div>
+              <button id="refreshTasksBtn" class="secondary compact">Refresh</button>
               <button id="newTaskBtn" class="secondary compact">New</button>
             </div>
             <ol id="taskList" class="task-list"></ol>
@@ -91,17 +92,12 @@
           <article class="panel settings-panel">
             <div class="section-title">
               <h2>Operator setup</h2>
-              <p>Connect to Penut and choose the Chrome profile Operator should use when it runs approved tasks.</p>
+              <p>Operator reuses your Penut CLI login and Chrome profile when it runs approved tasks.</p>
             </div>
 
             <label class="field">
-              <span>Penut API URL</span>
-              <input id="penutApiBaseUrl" type="url" placeholder="Paste your Penut platform API URL" />
-            </label>
-
-            <label class="field">
-              <span>Penut access token</span>
-              <input id="penutAccessToken" type="password" placeholder="Paste a Penut access token for local testing" />
+              <span>Penut API URL override</span>
+              <input id="penutApiBaseUrl" type="url" placeholder="Leave blank to use your Penut CLI config" />
             </label>
 
             <label class="field">

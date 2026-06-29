@@ -137,12 +137,38 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
     if (task.status !== "approved") {
       await penutClient.approveTask(task.remoteId, { editedPrompt: cleanPrompt });
     }
+  } else if (!task.remoteId && penutClient.isConfigured) {
+    const session = await penutClient.readSession();
+    const assignedMemberId = session.currentMemberId;
+    if (!assignedMemberId) {
+      throw new Error("Penut CLI session has no current member. Run penut auth status and select a project.");
+    }
+    const created = await penutClient.createTask({
+      title: "Operator task",
+      prompt: cleanPrompt,
+      assignedMemberId,
+    });
+    const remoteTask = created.task || {};
+    task = await taskStore.updateTask(task.id, {
+      remoteId: remoteTask.id,
+      approvalRequestId: remoteTask.approvalRequestId || null,
+      approvalActionId: remoteTask.approvalActionId || null,
+      status: "approved",
+    });
+  }
+
+  if (task.remoteId && penutClient.isConfigured) {
     await penutClient.claimTask(task.remoteId, { leaseSeconds: 900 });
     await penutClient.updateStatus(task.remoteId, { status: "running" });
     task = await taskStore.updateTask(task.id, { status: "running" });
   }
 
-  activeRun = { taskId: task.id, stop: () => {} };
+  activeRun = {
+    taskId: task.id,
+    remoteId: task.remoteId || null,
+    stopped: false,
+    stop: () => {},
+  };
   await taskStore.updateActiveTask({ status: "running" });
   mainWindow?.webContents.send("tasks:changed", await taskStore.getState());
 
@@ -160,6 +186,10 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
         }, task.id).catch(() => {});
       }
     });
+    if (activeRun?.taskId === task.id && activeRun.stopped) {
+      const state = await taskStore.getState();
+      return { ok: false, stopped: true, state };
+    }
     const status = result.ok ? "completed" : "failed";
     if (task.remoteId && penutClient.isConfigured) {
       await penutClient.updateStatus(task.remoteId, {
@@ -171,6 +201,10 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
     const state = await taskStore.getState();
     return { ...result, task: updatedTask, state };
   } catch (error) {
+    if (activeRun?.taskId === task.id && activeRun.stopped) {
+      const state = await taskStore.getState();
+      return { ok: false, stopped: true, state };
+    }
     if (task.remoteId && penutClient.isConfigured) {
       await penutClient.updateStatus(task.remoteId, {
         status: "failed",
@@ -193,10 +227,22 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
 
 ipcMain.handle("agent:stop", async () => {
   if (!activeRun) return { ok: true };
-  const runningTaskId = activeRun.taskId;
-  activeRun.stop();
-  activeRun = null;
-  await taskStore.updateTask(runningTaskId, { status: "stopped" });
+  const runningTask = activeRun;
+  runningTask.stopped = true;
+  runningTask.stop();
+  const settings = await settingsStore.getSettings();
+  const penutClient = createPenutApiClient(settings);
+  if (runningTask.remoteId && penutClient.isConfigured) {
+    await penutClient.updateStatus(runningTask.remoteId, {
+      status: "cancelled",
+    }).catch(() => {});
+  }
+  await taskStore.appendEvent({
+    type: "status",
+    message: "Stopped by you.",
+  }, runningTask.taskId).catch(() => {});
+  activeRun = runningTask;
+  await taskStore.updateTask(runningTask.taskId, { status: "stopped" });
   const state = await taskStore.getState();
   mainWindow?.webContents.send("tasks:changed", state);
   return { ok: true, state };
@@ -205,19 +251,20 @@ ipcMain.handle("agent:stop", async () => {
 async function syncTasksFromPenut() {
   const settings = await settingsStore.getSettings();
   const client = createPenutApiClient(settings);
-  if (!client.isConfigured) return taskStore.getState();
+  if (!client.isConfigured) {
+    return taskStore.setSyncError(
+      "Operator is not connected to Penut. Run penut auth login --device from your agent, then reopen Operator.",
+    );
+  }
 
   try {
     const payload = await client.listTasks();
     const state = await taskStore.mergeRemoteTasks(payload.tasks || []);
     return state;
   } catch (error) {
-    await taskStore.appendEvent({
-      type: "system",
-      message: "Could not sync tasks from Penut.",
-      detail: { error: error.message },
-    }).catch(() => {});
-    return taskStore.getState();
+    return taskStore.setSyncError(
+      `Could not sync tasks from Penut. Check that your agent is connected to Penut. ${error.message}`,
+    );
   }
 }
 
@@ -317,10 +364,10 @@ function runBrowserUseWorker(task, settings, onEvent) {
       });
     });
 
-    activeRun = {
-      taskId: task.id,
-      stop: () => child.kill("SIGTERM"),
-    };
+    if (activeRun?.taskId === task.id) {
+      activeRun.stop = () => child.kill("SIGTERM");
+      activeRun.remoteId = task.remoteId || null;
+    }
   });
 }
 
@@ -355,13 +402,16 @@ function getRuntimePaths() {
 }
 
 function checkPenutConnection(settings) {
-  const ready = Boolean(settings.penutApiBaseUrl && settings.penutAccessToken);
+  const client = createPenutApiClient(settings);
+  const ready = client.isConfigured;
   return {
     id: "penutConnection",
     label: "Penut connection",
     ready,
-    message: ready ? "Connected to Penut task sync." : "Penut task sync is not connected yet.",
-    action: "Add your Penut API URL and access token in Settings.",
+    message: ready
+      ? "Using your Penut CLI login for task sync."
+      : "Penut CLI login was not found.",
+    action: "Run penut auth login --device, then reopen Operator.",
   };
 }
 

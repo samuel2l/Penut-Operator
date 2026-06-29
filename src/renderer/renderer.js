@@ -8,12 +8,12 @@ const taskDetails = document.querySelector("#taskDetails");
 const emptyState = document.querySelector("#emptyState");
 const emptyActivity = document.querySelector("#emptyActivity");
 const taskList = document.querySelector("#taskList");
+const refreshTasksBtn = document.querySelector("#refreshTasksBtn");
 const newTaskBtn = document.querySelector("#newTaskBtn");
 const backBtn = document.querySelector("#backBtn");
 const approvalsNavBtn = document.querySelector("#approvalsNavBtn");
 const settingsNavBtn = document.querySelector("#settingsNavBtn");
 const penutApiBaseUrl = document.querySelector("#penutApiBaseUrl");
-const penutAccessToken = document.querySelector("#penutAccessToken");
 const chromeProfileSelect = document.querySelector("#chromeProfileSelect");
 const profileHelp = document.querySelector("#profileHelp");
 const saveSettingsBtn = document.querySelector("#saveSettingsBtn");
@@ -30,6 +30,7 @@ let currentScreen = "list";
 let currentSettings;
 let chromeProfileData = { userDataDir: "", profiles: [] };
 let currentReadiness = { ready: false, checks: [] };
+let refreshInProgress = false;
 
 function humanStatus(status) {
   return String(status || "unknown").replaceAll("_", " ");
@@ -117,12 +118,20 @@ function render(state) {
   if (!task) {
     taskDetails.classList.add("hidden");
     emptyState.classList.toggle("hidden", !isDetail);
-    statusBadge.textContent = "No tasks";
-    statusBadge.className = "badge";
+    const syncError = state?.syncError;
+    const emptyTitle = emptyState.querySelector("h2");
+    const emptyMessage = emptyState.querySelector("p");
+    if (emptyTitle) emptyTitle.textContent = syncError ? "Cannot load approvals" : "No approvals";
+    if (emptyMessage) {
+      emptyMessage.textContent = syncError || "No approved browser tasks are assigned to you yet.";
+    }
+    statusBadge.textContent = syncError ? "Connection issue" : "No tasks";
+    statusBadge.className = syncError ? "badge failed" : "badge";
+    taskList.replaceChildren();
     return;
   }
   selectedTaskId = task.id;
-  const anyRunning = (state.tasks || []).some((item) => item.status === "running");
+  const currentTaskRunning = task.status === "running";
 
   taskDetails.classList.toggle("hidden", !isDetail);
   emptyState.classList.add("hidden");
@@ -144,10 +153,11 @@ function render(state) {
 
   const canEdit = ["pending", "approved", "failed", "stopped"].includes(task.status);
   taskPrompt.disabled = !canEdit;
-  approveBtn.disabled = anyRunning || !["pending", "approved", "failed", "stopped"].includes(task.status);
-  stopBtn.disabled = task.status !== "running";
-  newTaskBtn.disabled = anyRunning;
-  resetBtn.disabled = anyRunning;
+  approveBtn.disabled = runInProgress || !["pending", "approved", "failed", "stopped"].includes(task.status);
+  stopBtn.disabled = !currentTaskRunning;
+  newTaskBtn.disabled = runInProgress;
+  refreshTasksBtn.disabled = runInProgress || refreshInProgress;
+  resetBtn.disabled = runInProgress;
 
   taskList.replaceChildren(
     ...(state.tasks || []).map((item) => {
@@ -164,10 +174,6 @@ function render(state) {
       button.addEventListener("click", async () => {
         setScreen("detail");
         promptDirty = false;
-        if (item.id === selectedTaskId) {
-          render(currentState);
-          return;
-        }
         render(await window.penutOperator.selectTask(item.id));
       });
       li.append(button);
@@ -203,7 +209,6 @@ function renderSettings(settingsPayload) {
   currentReadiness = settingsPayload.readiness || { ready: false, checks: [] };
   const profiles = chromeProfileData.profiles || [];
   penutApiBaseUrl.value = currentSettings.penutApiBaseUrl || "";
-  penutAccessToken.value = currentSettings.penutAccessToken || "";
 
   chromeProfileSelect.replaceChildren(
     ...profiles.map((profile) => {
@@ -256,6 +261,18 @@ async function refresh() {
   render(await window.penutOperator.getTask());
 }
 
+async function refreshTasks() {
+  if (!window.penutOperator || refreshInProgress) return;
+  refreshInProgress = true;
+  refreshTasksBtn.disabled = true;
+  try {
+    render(await window.penutOperator.getTask());
+  } finally {
+    refreshInProgress = false;
+    refreshTasksBtn.disabled = false;
+  }
+}
+
 taskPrompt.addEventListener("input", () => {
   promptDirty = true;
 });
@@ -278,6 +295,8 @@ backBtn.addEventListener("click", () => {
   render(currentState);
 });
 
+refreshTasksBtn.addEventListener("click", refreshTasks);
+
 approvalsNavBtn.addEventListener("click", () => {
   setScreen("list");
   promptDirty = false;
@@ -295,7 +314,6 @@ saveSettingsBtn.addEventListener("click", async () => {
   const profile = (chromeProfileData.profiles || []).find((item) => item.directory === directory);
   renderSettings(await window.penutOperator.updateSettings({
     penutApiBaseUrl: penutApiBaseUrl.value.trim(),
-    penutAccessToken: penutAccessToken.value.trim(),
     chromeUserDataDir: chromeProfileData.userDataDir,
     chromeProfileDirectory: directory,
     chromeProfileName: profile?.name || directory,
@@ -338,6 +356,12 @@ stopBtn.addEventListener("click", async () => {
 });
 
 if (window.penutOperator) window.penutOperator.onTaskChanged(render);
+window.addEventListener("focus", refreshTasks);
+setInterval(() => {
+  if (document.visibilityState === "visible" && currentScreen === "list") {
+    void refreshTasks();
+  }
+}, 15000);
 refresh().catch((error) => {
   statusBadge.textContent = error.message;
   statusBadge.className = "badge failed";

@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir, rename, unlink, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,7 +105,6 @@ async function readProfileDirs() {
 function normalizeSettings(settings) {
   return {
     penutApiBaseUrl: settings.penutApiBaseUrl || process.env.PENUT_API_BASE_URL || "",
-    penutAccessToken: settings.penutAccessToken || process.env.PENUT_ACCESS_TOKEN || "",
     chromeUserDataDir: settings.chromeUserDataDir || CHROME_USER_DATA_DIR,
     chromeProfileDirectory: settings.chromeProfileDirectory || "",
     chromeProfileName: settings.chromeProfileName || "",

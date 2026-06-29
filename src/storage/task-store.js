@@ -19,6 +19,7 @@ export function createTaskStore() {
     selectTask,
     createTask,
     mergeRemoteTasks,
+    setSyncError,
     updateTask,
     updateActiveTask,
     resetActiveTask,
@@ -80,6 +81,7 @@ async function createTask(prompt = "") {
     const next = {
       ...state,
       selectedTaskId: task.id,
+      syncError: null,
       tasks: [task, ...state.tasks].slice(0, MAX_TASKS),
       updatedAt: now,
     };
@@ -92,15 +94,38 @@ async function mergeRemoteTasks(remoteTasks = []) {
   return enqueueTaskWrite(async () => {
     const state = await readState();
     const now = new Date().toISOString();
-    const localTasks = state.tasks.filter((task) => !task.remoteId);
-    const remote = remoteTasks.map(normalizeRemoteTask);
+    const remote = remoteTasks.map((remoteTask) => {
+      const existing = findExistingRemoteTask(state.tasks, remoteTask.id);
+      return normalizeRemoteTask(remoteTask, existing);
+    });
     const selectedTaskId = remote.some((task) => task.id === state.selectedTaskId)
       ? state.selectedTaskId
-      : remote[0]?.id || state.selectedTaskId;
+      : remote[0]?.id || null;
     const next = {
       ...state,
       selectedTaskId,
-      tasks: [...remote, ...localTasks].slice(0, MAX_TASKS),
+      syncError: null,
+      tasks: remote.slice(0, MAX_TASKS),
+      updatedAt: now,
+    };
+    await writeState(next);
+    return next;
+  });
+}
+
+function findExistingRemoteTask(tasks, remoteId) {
+  return tasks.find((task) => task.remoteId === remoteId || task.id === `remote_${remoteId}`);
+}
+
+async function setSyncError(message) {
+  return enqueueTaskWrite(async () => {
+    const state = await readState();
+    const now = new Date().toISOString();
+    const next = {
+      ...state,
+      selectedTaskId: null,
+      syncError: message,
+      tasks: [],
       updatedAt: now,
     };
     await writeState(next);
@@ -135,6 +160,7 @@ async function resetActiveTask() {
     const state = {
       version: 2,
       selectedTaskId: task.id,
+      syncError: null,
       tasks: [task],
       updatedAt: new Date().toISOString(),
     };
@@ -181,13 +207,14 @@ async function readTaskFile() {
 
 function normalizeState(raw) {
   if (raw?.version === 2 && Array.isArray(raw.tasks)) {
-    const tasks = raw.tasks.length ? raw.tasks.map(normalizeTask) : [makeEmptyTask()];
+    const tasks = raw.tasks.map(normalizeTask);
     const selectedTaskId = tasks.some((task) => task.id === raw.selectedTaskId)
       ? raw.selectedTaskId
-      : tasks[0].id;
+      : tasks[0]?.id || null;
     return {
       version: 2,
       selectedTaskId,
+      syncError: raw.syncError || null,
       tasks,
       updatedAt: raw.updatedAt || new Date().toISOString(),
     };
@@ -197,6 +224,7 @@ function normalizeState(raw) {
   return {
     version: 2,
     selectedTaskId: task.id,
+    syncError: null,
     tasks: [task],
     updatedAt: task.updatedAt || new Date().toISOString(),
   };
@@ -219,11 +247,12 @@ function normalizeTask(task) {
   };
 }
 
-function normalizeRemoteTask(task) {
+function normalizeRemoteTask(task, existingTask) {
   const now = new Date().toISOString();
   const status = normalizeRemoteStatus(task.status);
   const prompt = task.editedPrompt || task.prompt || "";
   return normalizeTask({
+    ...existingTask,
     id: `remote_${task.id}`,
     remoteId: task.id,
     approvalRequestId: task.approvalRequestId || null,
@@ -234,7 +263,7 @@ function normalizeRemoteTask(task) {
     prompt,
     createdAt: task.createdAt || now,
     updatedAt: task.updatedAt || task.createdAt || now,
-    events: [],
+    events: existingTask?.events || [],
   });
 }
 
