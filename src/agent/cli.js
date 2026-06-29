@@ -3,7 +3,10 @@ import { OperatorAgentRuntime } from "./runtime.js";
 
 const dryRun = process.argv.includes("--dry-run");
 const taskStore = createTaskStore();
-const task = await taskStore.getActiveTask();
+const task = (await taskStore.getActiveTask()) || (dryRun ? makeDryRunTask() : null);
+if (!task) {
+  throw new Error("No task is available to run.");
+}
 
 const runtime = new OperatorAgentRuntime({
   allowDryRun: dryRun,
@@ -16,3 +19,15 @@ const runtime = new OperatorAgentRuntime({
 
 const result = await runtime.run(task);
 console.log(JSON.stringify(result, null, 2));
+
+function makeDryRunTask() {
+  const now = new Date().toISOString();
+  return {
+    id: "dry_run_task",
+    status: "approved",
+    prompt: "Dry-run browser task",
+    createdAt: now,
+    updatedAt: now,
+    events: [],
+  };
+}

@@ -173,6 +173,9 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
   const settings = await settingsStore.getSettings();
   const readiness = await getRunReadiness(settings);
   const currentTask = await taskStore.getActiveTask();
+  if (!currentTask) {
+    return { ok: false, error: "Create or select a task before approving it." };
+  }
   const blocker = readiness.checks.find((check) => !check.ready);
   if (blocker) {
     return { ok: false, error: blocker.action };
@@ -321,6 +324,7 @@ async function syncTasksFromPenut() {
   if (!client.isConfigured) {
     return taskStore.setSyncError(
       "Sign in to Penut to load browser tasks.",
+      "auth_required",
     );
   }
 
@@ -332,6 +336,7 @@ async function syncTasksFromPenut() {
   } catch (error) {
     return taskStore.setSyncError(
       `Could not sync tasks from Penut. ${friendlyPenutConnectionError(error)}`,
+      isAuthError(error) ? "auth_required" : "connection_error",
     );
   }
 }
@@ -342,7 +347,28 @@ async function settingsPayload() {
     settings,
     chromeProfiles: await settingsStore.listChromeProfiles(),
     readiness: await getRunReadiness(settings),
+    auth: await readAuthSummary(settings),
   };
+}
+
+async function readAuthSummary(settings) {
+  const client = createPenutApiClient(settings, { authStore });
+  if (!client.isConfigured) return null;
+  try {
+    const session = await client.readSession();
+    const identity = session.currentMember || session.members?.find((member) => {
+      return member.id === session.currentMemberId;
+    });
+    const account = identity?.email || identity?.name || "Signed in";
+    const project = session.currentProject?.name;
+    return {
+      label: project ? `Signed in as ${account} · ${project}` : `Signed in as ${account}`,
+      account,
+      project: project || null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function reconcileTerminalLocalTasks(client, remoteTasks) {
@@ -550,6 +576,12 @@ function friendlyPenutConnectionError(error) {
     return "Cannot reach Penut right now. Check your connection and try again.";
   }
   return "Penut could not verify your session.";
+}
+
+function isAuthError(error) {
+  return /expired|401|unauthorized|sign in|login/i.test(
+    String(error?.message || ""),
+  );
 }
 
 function friendlyPenutConnectionAction(error) {

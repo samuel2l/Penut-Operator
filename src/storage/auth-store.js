@@ -33,7 +33,6 @@ function readSession() {
       return null;
     }
   }
-  if (payload.mode === "plain") return normalizeSession(payload.session);
   return null;
 }
 
@@ -41,17 +40,15 @@ function saveSession(session) {
   mkdirSync(DATA_DIR, { recursive: true });
   const normalized = normalizeSession(session);
   if (!normalized) return;
-  const payload = safeStorage.isEncryptionAvailable()
-    ? {
-        mode: "safeStorage",
-        data: safeStorage
-          .encryptString(JSON.stringify(normalized))
-          .toString("base64"),
-      }
-    : {
-        mode: "plain",
-        session: normalized,
-      };
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error("Secure storage is unavailable. Operator cannot save your Penut sign-in on this computer.");
+  }
+  const payload = {
+    mode: "safeStorage",
+    data: safeStorage
+      .encryptString(JSON.stringify(normalized))
+      .toString("base64"),
+  };
   writeFileSync(SESSION_FILE, `${JSON.stringify(payload, null, 2)}\n`, {
     mode: 0o600,
   });

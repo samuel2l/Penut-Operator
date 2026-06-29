@@ -1,23 +1,13 @@
-import { readFileSync, writeFileSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
-const PENUT_HOME = path.join(os.homedir(), ".penut");
-const CLI_CONFIG_FILE = path.join(PENUT_HOME, "config.json");
-const CLI_SESSION_FILE = path.join(PENUT_HOME, "session.json");
 const DEFAULT_API_URL = "https://api.penut.ai/";
 
 export function createPenutApiClient(settings = {}, options = {}) {
   const authStore = options.authStore || null;
-  const operatorSession = authStore?.readSession() || null;
-  let cliAuth = readCliAuth();
-  let auth = operatorSession || cliAuth;
+  let auth = authStore?.readSession() || {};
   const baseUrl = normalizeApiBaseUrl(process.env.PENUT_API_BASE_URL || DEFAULT_API_URL);
-  const authSource = operatorSession ? "operator" : cliAuth.accessToken ? "cli" : "missing";
 
   return {
     isConfigured: Boolean(baseUrl && auth.accessToken),
-    authSource,
+    authSource: auth.accessToken ? "operator" : "missing",
     hasBaseUrl: Boolean(baseUrl),
     hasAccessToken: Boolean(auth.accessToken),
     hasRefreshToken: Boolean(auth.refreshToken),
@@ -95,7 +85,6 @@ export function createPenutApiClient(settings = {}, options = {}) {
       headers: {
         Authorization: `Bearer ${auth.accessToken}`,
         Accept: "application/json",
-        ...(cliAuth.projectId ? { "x-penut-project-id": cliAuth.projectId } : {}),
         ...(options.body ? { "Content-Type": "application/json" } : {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
@@ -104,7 +93,7 @@ export function createPenutApiClient(settings = {}, options = {}) {
     const text = await response.text();
     const payload = text ? safeJson(text) : null;
     if (response.status === 401 && auth.refreshToken && !options.skipRefresh) {
-      auth = await refreshAuth(baseUrl, auth, authSource, authStore);
+      auth = await refreshAuth(baseUrl, auth, authStore);
       return request(path, { ...options, skipRefresh: true });
     }
     if (!response.ok) {
@@ -142,30 +131,11 @@ export function createPenutApiClient(settings = {}, options = {}) {
 
   function saveAuth(nextAuth) {
     auth = { ...auth, ...nextAuth };
-    if (authStore) {
-      authStore.saveSession(auth);
-      return;
-    }
-    writeCliSession(auth);
+    authStore?.saveSession(auth);
   }
 }
 
-function readCliAuth() {
-  const config = readJson(CLI_CONFIG_FILE) || {};
-  const session = readJson(CLI_SESSION_FILE) || {};
-  return {
-    apiUrl: typeof config.apiUrl === "string" ? config.apiUrl : "",
-    projectId:
-      typeof config.currentProjectId === "string" ? config.currentProjectId : "",
-    accessToken:
-      typeof session.accessToken === "string" ? session.accessToken : "",
-    refreshToken:
-      typeof session.refreshToken === "string" ? session.refreshToken : "",
-    expiresAt: session.expiresAt,
-  };
-}
-
-async function refreshAuth(baseUrl, currentAuth, authSource, authStore) {
+async function refreshAuth(baseUrl, currentAuth, authStore) {
   const response = await fetch(`${baseUrl}/identity/oauth/refresh`, {
     method: "POST",
     headers: {
@@ -184,28 +154,8 @@ async function refreshAuth(baseUrl, currentAuth, authSource, authStore) {
     accessToken: payload.accessToken,
     expiresAt: payload.expiresAt,
   };
-  if (authSource === "operator" && authStore) {
-    authStore.saveSession(nextAuth);
-  } else {
-    writeCliSession(nextAuth);
-  }
+  authStore?.saveSession(nextAuth);
   return nextAuth;
-}
-
-function writeCliSession(auth) {
-  writeFileSync(
-    CLI_SESSION_FILE,
-    `${JSON.stringify(
-      {
-        accessToken: auth.accessToken,
-        refreshToken: auth.refreshToken,
-        expiresAt: auth.expiresAt,
-      },
-      null,
-      2,
-    )}\n`,
-    { mode: 0o600 },
-  );
 }
 
 function normalizeApiBaseUrl(value) {
@@ -214,14 +164,6 @@ function normalizeApiBaseUrl(value) {
   if (raw.endsWith("/api")) return raw;
   if (raw.endsWith("/api/platform")) return raw.replace(/\/platform$/, "");
   return `${raw}/api`;
-}
-
-function readJson(filePath) {
-  try {
-    return JSON.parse(readFileSync(filePath, "utf8"));
-  } catch {
-    return null;
-  }
 }
 
 function safeJson(text) {

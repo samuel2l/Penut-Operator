@@ -6,6 +6,7 @@ const detailScreen = document.querySelector("#detailScreen");
 const settingsScreen = document.querySelector("#settingsScreen");
 const taskDetails = document.querySelector("#taskDetails");
 const emptyState = document.querySelector("#emptyState");
+const emptyActionBtn = document.querySelector("#emptyActionBtn");
 const emptyActivity = document.querySelector("#emptyActivity");
 const taskList = document.querySelector("#taskList");
 const refreshTasksBtn = document.querySelector("#refreshTasksBtn");
@@ -29,6 +30,7 @@ let currentState;
 let selectedTaskId;
 let currentScreen = "list";
 let currentSettings;
+let currentAuth;
 let chromeProfileData = { userDataDir: "", profiles: [] };
 let currentReadiness = { ready: false, checks: [] };
 let refreshInProgress = false;
@@ -119,15 +121,18 @@ function render(state) {
   if (!task) {
     taskDetails.classList.add("hidden");
     emptyState.classList.toggle("hidden", !isDetail);
-    const syncError = state?.syncError;
+    const syncState = describeSyncState(state);
     const emptyTitle = emptyState.querySelector("h2");
     const emptyMessage = emptyState.querySelector("p");
-    if (emptyTitle) emptyTitle.textContent = syncError ? "Cannot load approvals" : "No approvals";
+    if (emptyTitle) emptyTitle.textContent = syncState.title;
     if (emptyMessage) {
-      emptyMessage.textContent = syncError || "No approved browser tasks are assigned to you yet.";
+      emptyMessage.textContent = syncState.message;
     }
-    statusBadge.textContent = syncError ? "Connection issue" : "No tasks";
-    statusBadge.className = syncError ? "badge failed" : "badge";
+    statusBadge.textContent = syncState.badge;
+    statusBadge.className = syncState.badgeClass;
+    emptyActionBtn.textContent = syncState.actionLabel || "";
+    emptyActionBtn.classList.toggle("hidden", !syncState.action);
+    emptyActionBtn.dataset.action = syncState.action || "";
     taskList.replaceChildren();
     return;
   }
@@ -203,8 +208,42 @@ function render(state) {
   );
 }
 
+function describeSyncState(state) {
+  if (!state?.syncError) {
+    return {
+      title: "No approvals",
+      message: "No approved browser tasks are assigned to you yet.",
+      badge: "No tasks",
+      badgeClass: "badge",
+      action: null,
+      actionLabel: "",
+    };
+  }
+
+  if (state.syncErrorReason === "auth_required") {
+    return {
+      title: "Sign in to Penut",
+      message: state.syncError,
+      badge: "Sign in needed",
+      badgeClass: "badge approved",
+      action: "sign_in",
+      actionLabel: "Sign in to Penut",
+    };
+  }
+
+  return {
+    title: "Cannot load approvals",
+    message: state.syncError,
+    badge: "Connection issue",
+    badgeClass: "badge failed",
+    action: "refresh",
+    actionLabel: "Try again",
+  };
+}
+
 function renderSettings(settingsPayload) {
   currentSettings = settingsPayload.settings;
+  currentAuth = settingsPayload.auth || null;
   chromeProfileData = settingsPayload.chromeProfiles;
   currentReadiness = settingsPayload.readiness || { ready: false, checks: [] };
   const profiles = chromeProfileData.profiles || [];
@@ -252,7 +291,11 @@ function renderSettings(settingsPayload) {
 function renderAuthState(message) {
   const penut = currentReadiness.checks.find((check) => check.id === "penutConnection");
   const signedIn = Boolean(penut?.ready);
-  authHelp.textContent = message || penut?.message || "Sign in to load and run your assigned browser tasks.";
+  authHelp.textContent =
+    message ||
+    currentAuth?.label ||
+    penut?.message ||
+    "Sign in to load and run your assigned browser tasks.";
   signInBtn.classList.toggle("hidden", signedIn);
   signOutBtn.classList.toggle("hidden", !signedIn);
   signInBtn.disabled = false;
@@ -328,8 +371,9 @@ saveSettingsBtn.addEventListener("click", async () => {
   statusBadge.className = "badge completed";
 });
 
-signInBtn.addEventListener("click", async () => {
+async function startSignIn() {
   signInBtn.disabled = true;
+  emptyActionBtn.disabled = true;
   try {
     const auth = await window.penutOperator.startAuth();
     const codeText = auth.userCode ? ` Code: ${auth.userCode}` : "";
@@ -338,6 +382,22 @@ signInBtn.addEventListener("click", async () => {
   } catch (error) {
     renderAuthState(error.message || "Could not start sign-in. Try again.");
     signInBtn.disabled = false;
+    emptyActionBtn.disabled = false;
+  }
+}
+
+signInBtn.addEventListener("click", startSignIn);
+
+emptyActionBtn.addEventListener("click", async () => {
+  if (emptyActionBtn.dataset.action === "sign_in") {
+    setScreen("settings");
+    renderSettings(await window.penutOperator.getSettings());
+    render(currentState);
+    await startSignIn();
+    return;
+  }
+  if (emptyActionBtn.dataset.action === "refresh") {
+    await refreshTasks();
   }
 });
 
@@ -351,17 +411,22 @@ signOutBtn.addEventListener("click", async () => {
 function startAuthPolling() {
   stopAuthPolling();
   authPollTimer = setInterval(async () => {
-    const result = await window.penutOperator.pollAuth();
-    if (result.pending) return;
-    stopAuthPolling();
-    if (result.authenticated && result.settings) {
-      renderSettings(result.settings);
-      render(await window.penutOperator.getTask());
-      statusBadge.textContent = "Signed in";
-      statusBadge.className = "badge completed";
-      return;
+    try {
+      const result = await window.penutOperator.pollAuth();
+      if (result.pending) return;
+      stopAuthPolling();
+      if (result.authenticated && result.settings) {
+        renderSettings(result.settings);
+        render(await window.penutOperator.getTask());
+        statusBadge.textContent = "Signed in";
+        statusBadge.className = "badge completed";
+        return;
+      }
+      renderAuthState(result.error || "Sign-in was not completed. Try again.");
+    } catch (error) {
+      stopAuthPolling();
+      renderAuthState(error.message || "Could not finish sign-in. Try again.");
     }
-    renderAuthState(result.error || "Sign-in was not completed. Try again.");
   }, 2500);
 }
 

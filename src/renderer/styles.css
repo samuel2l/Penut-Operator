@@ -214,6 +214,10 @@ nav {
   line-height: 1.5;
 }
 
+.empty-state button {
+  margin-top: 18px;
+}
+
 .hidden {
   display: none !important;
 }

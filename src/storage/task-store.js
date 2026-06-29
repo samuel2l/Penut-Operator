@@ -80,6 +80,7 @@ async function createTask(prompt = "") {
       ...state,
       selectedTaskId: task.id,
       syncError: null,
+      syncErrorReason: null,
       tasks: [task, ...state.tasks].slice(0, MAX_TASKS),
       updatedAt: now,
     };
@@ -103,6 +104,7 @@ async function mergeRemoteTasks(remoteTasks = []) {
       ...state,
       selectedTaskId,
       syncError: null,
+      syncErrorReason: null,
       tasks: remote.slice(0, MAX_TASKS),
       updatedAt: now,
     };
@@ -115,7 +117,7 @@ function findExistingRemoteTask(tasks, remoteId) {
   return tasks.find((task) => task.remoteId === remoteId || task.id === `remote_${remoteId}`);
 }
 
-async function setSyncError(message) {
+async function setSyncError(message, reason = "sync_error") {
   return enqueueTaskWrite(async () => {
     const state = await readState();
     const now = new Date().toISOString();
@@ -123,6 +125,7 @@ async function setSyncError(message) {
       ...state,
       selectedTaskId: null,
       syncError: message,
+      syncErrorReason: reason,
       tasks: [],
       updatedAt: now,
     };
@@ -140,6 +143,9 @@ async function updateTask(taskId, patch) {
   return enqueueTaskWrite(async () => {
     const state = await readState();
     const task = state.tasks.find((item) => item.id === taskId) || getSelectedTask(state);
+    if (!task) {
+      throw new Error("No task is available to update.");
+    }
     const now = new Date().toISOString();
     const nextTask = {
       ...task,
@@ -158,6 +164,7 @@ async function appendEvent(event, taskId) {
     const task = taskId
       ? state.tasks.find((item) => item.id === taskId) || getSelectedTask(state)
       : getSelectedTask(state);
+    if (!task) return null;
     const now = new Date().toISOString();
     const nextTask = {
       ...task,
@@ -198,6 +205,7 @@ function normalizeState(raw) {
       version: 2,
       selectedTaskId,
       syncError: raw.syncError || null,
+      syncErrorReason: raw.syncErrorReason || null,
       tasks,
       updatedAt: raw.updatedAt || new Date().toISOString(),
     };
@@ -208,6 +216,7 @@ function normalizeState(raw) {
     version: 2,
     selectedTaskId: task?.id || null,
     syncError: null,
+    syncErrorReason: null,
     tasks: task ? [task] : [],
     updatedAt: task?.updatedAt || new Date().toISOString(),
   };
@@ -295,6 +304,7 @@ function emptyState() {
     version: 2,
     selectedTaskId: null,
     syncError: null,
+    syncErrorReason: null,
     tasks: [],
     updatedAt: new Date().toISOString(),
   };
