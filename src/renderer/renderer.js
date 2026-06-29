@@ -13,7 +13,6 @@ const newTaskBtn = document.querySelector("#newTaskBtn");
 const backBtn = document.querySelector("#backBtn");
 const approvalsNavBtn = document.querySelector("#approvalsNavBtn");
 const settingsNavBtn = document.querySelector("#settingsNavBtn");
-const penutApiBaseUrl = document.querySelector("#penutApiBaseUrl");
 const chromeProfileSelect = document.querySelector("#chromeProfileSelect");
 const profileHelp = document.querySelector("#profileHelp");
 const saveSettingsBtn = document.querySelector("#saveSettingsBtn");
@@ -208,7 +207,6 @@ function renderSettings(settingsPayload) {
   chromeProfileData = settingsPayload.chromeProfiles;
   currentReadiness = settingsPayload.readiness || { ready: false, checks: [] };
   const profiles = chromeProfileData.profiles || [];
-  penutApiBaseUrl.value = currentSettings.penutApiBaseUrl || "";
 
   chromeProfileSelect.replaceChildren(
     ...profiles.map((profile) => {
@@ -313,7 +311,6 @@ saveSettingsBtn.addEventListener("click", async () => {
   const directory = chromeProfileSelect.value;
   const profile = (chromeProfileData.profiles || []).find((item) => item.directory === directory);
   renderSettings(await window.penutOperator.updateSettings({
-    penutApiBaseUrl: penutApiBaseUrl.value.trim(),
     chromeUserDataDir: chromeProfileData.userDataDir,
     chromeProfileDirectory: directory,
     chromeProfileName: profile?.name || directory,

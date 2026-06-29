@@ -8,11 +8,14 @@ const CLI_SESSION_FILE = path.join(PENUT_HOME, "session.json");
 
 export function createPenutApiClient(settings) {
   let cliAuth = readCliAuth();
-  const baseUrl = normalizeApiBaseUrl(settings.penutApiBaseUrl || cliAuth.apiUrl);
+  const baseUrl = normalizeApiBaseUrl(process.env.PENUT_API_BASE_URL || cliAuth.apiUrl);
 
   return {
     isConfigured: Boolean(baseUrl && cliAuth.accessToken),
     authSource: cliAuth.accessToken ? "cli" : "missing",
+    hasBaseUrl: Boolean(baseUrl),
+    hasAccessToken: Boolean(cliAuth.accessToken),
+    hasRefreshToken: Boolean(cliAuth.refreshToken),
     readSession: () => request("/identity/session"),
     listTasks: () => request("/browser/tasks"),
     readTask: (taskId) => request(`/browser/tasks/${encodeURIComponent(taskId)}`),

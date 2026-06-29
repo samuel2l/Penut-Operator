@@ -398,7 +398,7 @@ function runBrowserUseWorker(task, settings, onEvent) {
 async function getRunReadiness(settings) {
   const paths = getRuntimePaths();
   const checks = [
-    checkPenutConnection(settings),
+    await checkPenutConnection(settings),
     checkChromeProfile(settings),
     checkOpenAiKey(),
     await checkPython(paths.pythonPath),
@@ -425,18 +425,69 @@ function getRuntimePaths() {
   };
 }
 
-function checkPenutConnection(settings) {
+async function checkPenutConnection(settings) {
   const client = createPenutApiClient(settings);
-  const ready = client.isConfigured;
+  if (!client.hasBaseUrl) {
+    return {
+      id: "penutConnection",
+      label: "Penut connection",
+      ready: false,
+      message: "Penut is not configured on this computer.",
+      action: "Sign in to Penut from your agent, then reopen Operator.",
+    };
+  }
+
+  if (!client.hasAccessToken) {
+    return {
+      id: "penutConnection",
+      label: "Penut connection",
+      ready: false,
+      message: "You need to sign in to Penut.",
+      action: "Run penut auth login --device from your agent, then reopen Operator.",
+    };
+  }
+
+  try {
+    await client.readSession();
+  } catch (error) {
+    return {
+      id: "penutConnection",
+      label: "Penut connection",
+      ready: false,
+      message: friendlyPenutConnectionError(error),
+      action: friendlyPenutConnectionAction(error),
+    };
+  }
+
   return {
     id: "penutConnection",
     label: "Penut connection",
-    ready,
-    message: ready
-      ? "Using your Penut CLI login for task sync."
-      : "Penut CLI login was not found.",
+    ready: true,
+    message: "Signed in to Penut.",
     action: "Run penut auth login --device, then reopen Operator.",
   };
+}
+
+function friendlyPenutConnectionError(error) {
+  const message = String(error?.message || "");
+  if (/expired|401|unauthorized|sign in|login/i.test(message)) {
+    return "Your Penut session expired. Sign in again to continue.";
+  }
+  if (/fetch failed|network|ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(message)) {
+    return "Cannot reach Penut right now. Check your connection and try again.";
+  }
+  return "Penut could not verify your session.";
+}
+
+function friendlyPenutConnectionAction(error) {
+  const message = String(error?.message || "");
+  if (/expired|401|unauthorized|sign in|login/i.test(message)) {
+    return "Run penut auth login --device from your agent, then reopen Operator.";
+  }
+  if (/fetch failed|network|ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(message)) {
+    return "Check your internet connection, then refresh Operator.";
+  }
+  return "Refresh Operator or sign in to Penut again from your agent.";
 }
 
 function checkChromeProfile(settings) {
