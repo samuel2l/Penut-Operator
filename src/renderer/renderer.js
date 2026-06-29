@@ -12,6 +12,8 @@ const newTaskBtn = document.querySelector("#newTaskBtn");
 const backBtn = document.querySelector("#backBtn");
 const approvalsNavBtn = document.querySelector("#approvalsNavBtn");
 const settingsNavBtn = document.querySelector("#settingsNavBtn");
+const penutApiBaseUrl = document.querySelector("#penutApiBaseUrl");
+const penutAccessToken = document.querySelector("#penutAccessToken");
 const chromeProfileSelect = document.querySelector("#chromeProfileSelect");
 const profileHelp = document.querySelector("#profileHelp");
 const saveSettingsBtn = document.querySelector("#saveSettingsBtn");
@@ -43,6 +45,8 @@ function readableStatus(status) {
     completed: "Completed",
     failed: "Needs attention",
     stopped: "Stopped",
+    rejected: "Rejected",
+    expired: "Expired",
   };
   return map[normalized] || humanStatus(status);
 }
@@ -140,7 +144,7 @@ function render(state) {
 
   const canEdit = ["pending", "approved", "failed", "stopped"].includes(task.status);
   taskPrompt.disabled = !canEdit;
-  approveBtn.disabled = anyRunning || !["pending", "failed", "stopped"].includes(task.status);
+  approveBtn.disabled = anyRunning || !["pending", "approved", "failed", "stopped"].includes(task.status);
   stopBtn.disabled = task.status !== "running";
   newTaskBtn.disabled = anyRunning;
   resetBtn.disabled = anyRunning;
@@ -198,6 +202,8 @@ function renderSettings(settingsPayload) {
   chromeProfileData = settingsPayload.chromeProfiles;
   currentReadiness = settingsPayload.readiness || { ready: false, checks: [] };
   const profiles = chromeProfileData.profiles || [];
+  penutApiBaseUrl.value = currentSettings.penutApiBaseUrl || "";
+  penutAccessToken.value = currentSettings.penutAccessToken || "";
 
   chromeProfileSelect.replaceChildren(
     ...profiles.map((profile) => {
@@ -288,10 +294,13 @@ saveSettingsBtn.addEventListener("click", async () => {
   const directory = chromeProfileSelect.value;
   const profile = (chromeProfileData.profiles || []).find((item) => item.directory === directory);
   renderSettings(await window.penutOperator.updateSettings({
+    penutApiBaseUrl: penutApiBaseUrl.value.trim(),
+    penutAccessToken: penutAccessToken.value.trim(),
     chromeUserDataDir: chromeProfileData.userDataDir,
     chromeProfileDirectory: directory,
     chromeProfileName: profile?.name || directory,
   }));
+  render(await window.penutOperator.getTask());
   statusBadge.textContent = "Profile saved";
   statusBadge.className = "badge completed";
 });

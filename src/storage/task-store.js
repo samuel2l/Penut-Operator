@@ -18,6 +18,7 @@ export function createTaskStore() {
     getActiveTask,
     selectTask,
     createTask,
+    mergeRemoteTasks,
     updateTask,
     updateActiveTask,
     resetActiveTask,
@@ -80,6 +81,26 @@ async function createTask(prompt = "") {
       ...state,
       selectedTaskId: task.id,
       tasks: [task, ...state.tasks].slice(0, MAX_TASKS),
+      updatedAt: now,
+    };
+    await writeState(next);
+    return next;
+  });
+}
+
+async function mergeRemoteTasks(remoteTasks = []) {
+  return enqueueTaskWrite(async () => {
+    const state = await readState();
+    const now = new Date().toISOString();
+    const localTasks = state.tasks.filter((task) => !task.remoteId);
+    const remote = remoteTasks.map(normalizeRemoteTask);
+    const selectedTaskId = remote.some((task) => task.id === state.selectedTaskId)
+      ? state.selectedTaskId
+      : remote[0]?.id || state.selectedTaskId;
+    const next = {
+      ...state,
+      selectedTaskId,
+      tasks: [...remote, ...localTasks].slice(0, MAX_TASKS),
       updatedAt: now,
     };
     await writeState(next);
@@ -185,6 +206,9 @@ function normalizeTask(task) {
   const now = new Date().toISOString();
   return {
     id: task.id || `task_${crypto.randomUUID()}`,
+    remoteId: task.remoteId || null,
+    approvalRequestId: task.approvalRequestId || null,
+    approvalActionId: task.approvalActionId || null,
     status: task.status || "pending",
     requestedBy: task.requestedBy || "Penut Agent",
     accountOwner: task.accountOwner || "Account owner",
@@ -193,6 +217,40 @@ function normalizeTask(task) {
     updatedAt: task.updatedAt || task.createdAt || now,
     events: Array.isArray(task.events) ? task.events : [],
   };
+}
+
+function normalizeRemoteTask(task) {
+  const now = new Date().toISOString();
+  const status = normalizeRemoteStatus(task.status);
+  const prompt = task.editedPrompt || task.prompt || "";
+  return normalizeTask({
+    id: `remote_${task.id}`,
+    remoteId: task.id,
+    approvalRequestId: task.approvalRequestId || null,
+    approvalActionId: task.approvalActionId || null,
+    status,
+    requestedBy: task.requestedByMemberId ? "Penut" : "Penut Agent",
+    accountOwner: "Assigned to you",
+    prompt,
+    createdAt: task.createdAt || now,
+    updatedAt: task.updatedAt || task.createdAt || now,
+    events: [],
+  });
+}
+
+function normalizeRemoteStatus(status) {
+  const map = {
+    pending_approval: "pending",
+    approved: "approved",
+    claimed: "running",
+    running: "running",
+    completed: "completed",
+    failed: "failed",
+    cancelled: "stopped",
+    rejected: "rejected",
+    expired: "failed",
+  };
+  return map[status] || status || "pending";
 }
 
 function getSelectedTask(state) {

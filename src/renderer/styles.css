@@ -27,6 +27,7 @@ body {
 }
 
 button,
+input,
 select,
 textarea {
   font: inherit;
@@ -325,6 +326,7 @@ nav {
 }
 
 select,
+input,
 textarea {
   width: 100%;
   border: 1px solid var(--line);

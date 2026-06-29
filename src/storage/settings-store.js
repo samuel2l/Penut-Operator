@@ -103,6 +103,8 @@ async function readProfileDirs() {
 
 function normalizeSettings(settings) {
   return {
+    penutApiBaseUrl: settings.penutApiBaseUrl || process.env.PENUT_API_BASE_URL || "http://localhost:3000/api/platform",
+    penutAccessToken: settings.penutAccessToken || process.env.PENUT_ACCESS_TOKEN || "",
     chromeUserDataDir: settings.chromeUserDataDir || CHROME_USER_DATA_DIR,
     chromeProfileDirectory: settings.chromeProfileDirectory || "",
     chromeProfileName: settings.chromeProfileName || "",

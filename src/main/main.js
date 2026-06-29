@@ -1,5 +1,6 @@
 import path from "node:path";
 import "dotenv/config";
+import crypto from "node:crypto";
 import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import os from "node:os";
@@ -8,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { createTaskStore } from "../storage/task-store.js";
 import { createSettingsStore } from "../storage/settings-store.js";
+import { createPenutApiClient } from "../penut/penut-api-client.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -46,10 +48,24 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-ipcMain.handle("tasks:get", async () => taskStore.getState());
+ipcMain.handle("tasks:get", async () => syncTasksFromPenut());
 
 ipcMain.handle("tasks:select", async (_event, taskId) => {
-  const state = await taskStore.selectTask(taskId);
+  let state = await taskStore.selectTask(taskId);
+  const task = state.tasks.find((item) => item.id === state.selectedTaskId);
+  const settings = await settingsStore.getSettings();
+  const client = createPenutApiClient(settings);
+  if (task?.remoteId && client.isConfigured) {
+    try {
+      const payload = await client.readTask(task.remoteId);
+      await taskStore.updateTask(task.id, {
+        events: mapRemoteEvents(payload.events || []),
+      });
+      state = await taskStore.getState();
+    } catch {
+      // Keep the cached task visible even if event refresh fails.
+    }
+  }
   mainWindow?.webContents.send("tasks:changed", state);
   return state;
 });
@@ -101,17 +117,30 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
 
   const settings = await settingsStore.getSettings();
   const readiness = await getRunReadiness(settings);
-  const blocker = readiness.checks.find((check) => !check.ready);
+  const currentTask = await taskStore.getActiveTask();
+  const blocker = readiness.checks.find((check) => {
+    if (check.id === "penutConnection" && !currentTask.remoteId) return false;
+    return !check.ready;
+  });
   if (blocker) {
     return { ok: false, error: blocker.action };
   }
 
-  const currentTask = await taskStore.getActiveTask();
   const cleanPrompt = String(prompt || currentTask.prompt || "").trim();
-  const task = await taskStore.updateActiveTask({
+  let task = await taskStore.updateActiveTask({
     prompt: cleanPrompt,
     status: "approved",
   });
+
+  const penutClient = createPenutApiClient(settings);
+  if (task.remoteId && penutClient.isConfigured) {
+    if (task.status !== "approved") {
+      await penutClient.approveTask(task.remoteId, { editedPrompt: cleanPrompt });
+    }
+    await penutClient.claimTask(task.remoteId, { leaseSeconds: 900 });
+    await penutClient.updateStatus(task.remoteId, { status: "running" });
+    task = await taskStore.updateTask(task.id, { status: "running" });
+  }
 
   activeRun = { taskId: task.id, stop: () => {} };
   await taskStore.updateActiveTask({ status: "running" });
@@ -121,6 +150,7 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
     const result = await runBrowserUseWorker(task, settings, async (event) => {
       try {
         await taskStore.appendEvent(event, task.id);
+        await sendRemoteEventIfNeeded(penutClient, task, event);
         mainWindow?.webContents.send("tasks:changed", await taskStore.getState());
       } catch (error) {
         await taskStore.appendEvent({
@@ -131,10 +161,22 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
       }
     });
     const status = result.ok ? "completed" : "failed";
+    if (task.remoteId && penutClient.isConfigured) {
+      await penutClient.updateStatus(task.remoteId, {
+        status,
+        ...(result.ok ? { result: { message: result.result } } : { error: { message: result.result } }),
+      });
+    }
     const updatedTask = await taskStore.updateTask(task.id, { status });
     const state = await taskStore.getState();
     return { ...result, task: updatedTask, state };
   } catch (error) {
+    if (task.remoteId && penutClient.isConfigured) {
+      await penutClient.updateStatus(task.remoteId, {
+        status: "failed",
+        error: { message: error.message },
+      }).catch(() => {});
+    }
     await taskStore.appendEvent({
       type: "agent",
       message: error.message,
@@ -159,6 +201,52 @@ ipcMain.handle("agent:stop", async () => {
   mainWindow?.webContents.send("tasks:changed", state);
   return { ok: true, state };
 });
+
+async function syncTasksFromPenut() {
+  const settings = await settingsStore.getSettings();
+  const client = createPenutApiClient(settings);
+  if (!client.isConfigured) return taskStore.getState();
+
+  try {
+    const payload = await client.listTasks();
+    const state = await taskStore.mergeRemoteTasks(payload.tasks || []);
+    return state;
+  } catch (error) {
+    await taskStore.appendEvent({
+      type: "system",
+      message: "Could not sync tasks from Penut.",
+      detail: { error: error.message },
+    }).catch(() => {});
+    return taskStore.getState();
+  }
+}
+
+async function sendRemoteEventIfNeeded(client, task, event) {
+  if (!task.remoteId || !client.isConfigured) return;
+  await client.addEvent(task.remoteId, {
+    eventType: mapEventType(event.type),
+    message: event.message || "Task update.",
+    detail: event.detail || {},
+  }).catch(() => {});
+}
+
+function mapEventType(type) {
+  if (["system", "status", "browser", "agent", "result", "error"].includes(type)) {
+    return type;
+  }
+  if (type === "complete") return "result";
+  return "agent";
+}
+
+function mapRemoteEvents(events) {
+  return events.map((event) => ({
+    id: event.id || `event_${crypto.randomUUID()}`,
+    type: event.eventType || "agent",
+    message: event.message || "Task update.",
+    detail: event.detail || {},
+    at: event.createdAt || new Date().toISOString(),
+  })).reverse();
+}
 
 function runBrowserUseWorker(task, settings, onEvent) {
   return new Promise((resolve, reject) => {
@@ -239,6 +327,7 @@ function runBrowserUseWorker(task, settings, onEvent) {
 async function getRunReadiness(settings) {
   const paths = getRuntimePaths();
   const checks = [
+    checkPenutConnection(settings),
     checkChromeProfile(settings),
     checkOpenAiKey(),
     await checkPython(paths.pythonPath),
@@ -262,6 +351,17 @@ function getRuntimePaths() {
     workerPath,
     pythonPath,
     browserUseTerminalBinary,
+  };
+}
+
+function checkPenutConnection(settings) {
+  const ready = Boolean(settings.penutApiBaseUrl && settings.penutAccessToken);
+  return {
+    id: "penutConnection",
+    label: "Penut connection",
+    ready,
+    message: ready ? "Connected to Penut task sync." : "Penut task sync is not connected yet.",
+    action: "Add your Penut API URL and access token in Settings.",
   };
 }
 

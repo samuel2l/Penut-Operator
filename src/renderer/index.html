@@ -90,9 +90,19 @@
         <section id="settingsScreen" class="screen hidden">
           <article class="panel settings-panel">
             <div class="section-title">
-              <h2>Browser setup</h2>
-              <p>Choose the Chrome profile Operator should use when it runs approved tasks.</p>
+              <h2>Operator setup</h2>
+              <p>Connect to Penut and choose the Chrome profile Operator should use when it runs approved tasks.</p>
             </div>
+
+            <label class="field">
+              <span>Penut API URL</span>
+              <input id="penutApiBaseUrl" type="url" placeholder="http://localhost:3000/api/platform" />
+            </label>
+
+            <label class="field">
+              <span>Penut access token</span>
+              <input id="penutAccessToken" type="password" placeholder="Paste a Penut access token for local testing" />
+            </label>
 
             <label class="field">
               <span>Chrome profile</span>
