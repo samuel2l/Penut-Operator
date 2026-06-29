@@ -249,7 +249,10 @@ function normalizeTask(task) {
 
 function normalizeRemoteTask(task, existingTask) {
   const now = new Date().toISOString();
-  const status = normalizeRemoteStatus(task.status);
+  const remoteStatus = normalizeRemoteStatus(task.status);
+  const status = terminalStatus(existingTask?.status) && ["running", "approved"].includes(remoteStatus)
+    ? existingTask.status
+    : remoteStatus;
   const prompt = task.editedPrompt || task.prompt || "";
   return normalizeTask({
     ...existingTask,
@@ -265,6 +268,10 @@ function normalizeRemoteTask(task, existingTask) {
     updatedAt: task.updatedAt || task.createdAt || now,
     events: existingTask?.events || [],
   });
+}
+
+function terminalStatus(status) {
+  return ["completed", "failed", "stopped", "rejected"].includes(status);
 }
 
 function normalizeRemoteStatus(status) {

@@ -195,6 +195,12 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
       await penutClient.updateStatus(task.remoteId, {
         status,
         ...(result.ok ? { result: { message: result.result } } : { error: { message: result.result } }),
+      }).catch(async (error) => {
+        await taskStore.appendEvent({
+          type: "system",
+          message: "Task finished locally, but Penut could not be updated.",
+          detail: { error: error.message },
+        }, task.id).catch(() => {});
       });
     }
     const updatedTask = await taskStore.updateTask(task.id, { status });
@@ -259,6 +265,7 @@ async function syncTasksFromPenut() {
 
   try {
     const payload = await client.listTasks();
+    await reconcileTerminalLocalTasks(client, payload.tasks || []);
     const state = await taskStore.mergeRemoteTasks(payload.tasks || []);
     return state;
   } catch (error) {
@@ -266,6 +273,23 @@ async function syncTasksFromPenut() {
       `Could not sync tasks from Penut. Check that your agent is connected to Penut. ${error.message}`,
     );
   }
+}
+
+async function reconcileTerminalLocalTasks(client, remoteTasks) {
+  const state = await taskStore.getState();
+  const remoteById = new Map(remoteTasks.map((task) => [task.id, task]));
+  await Promise.all((state.tasks || []).map(async (task) => {
+    if (!task.remoteId || !["completed", "failed", "stopped"].includes(task.status)) return;
+    const remote = remoteById.get(task.remoteId);
+    if (!remote || !["claimed", "running", "approved"].includes(remote.status)) return;
+    const status = task.status === "stopped" ? "cancelled" : task.status;
+    await client.updateStatus(task.remoteId, {
+      status,
+      ...(status === "completed"
+        ? { result: { message: "Task completed locally." } }
+        : { error: { message: "Task did not complete locally." } }),
+    }).catch(() => {});
+  }));
 }
 
 async function sendRemoteEventIfNeeded(client, task, event) {
