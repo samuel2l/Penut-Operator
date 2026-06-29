@@ -17,6 +17,9 @@ const chromeProfileSelect = document.querySelector("#chromeProfileSelect");
 const profileHelp = document.querySelector("#profileHelp");
 const saveSettingsBtn = document.querySelector("#saveSettingsBtn");
 const readinessList = document.querySelector("#readinessList");
+const authHelp = document.querySelector("#authHelp");
+const signInBtn = document.querySelector("#signInBtn");
+const signOutBtn = document.querySelector("#signOutBtn");
 const approveBtn = document.querySelector("#approveBtn");
 const stopBtn = document.querySelector("#stopBtn");
 let runInProgress = false;
@@ -29,6 +32,7 @@ let currentSettings;
 let chromeProfileData = { userDataDir: "", profiles: [] };
 let currentReadiness = { ready: false, checks: [] };
 let refreshInProgress = false;
+let authPollTimer;
 
 function humanStatus(status) {
   return String(status || "unknown").replaceAll("_", " ");
@@ -67,7 +71,6 @@ function friendlyEventMessage(event) {
     "Operator run started.": "Task started",
     "Observed browser page.": "Page opened",
     "Operator run stopped by user.": "Stopped by you",
-    "Loaded sample browser task seed.": "Loaded sample task",
   };
   return map[event?.message] || event?.message || "Update";
 }
@@ -225,6 +228,8 @@ function renderSettings(settingsPayload) {
     ? `Operator will use Chrome profile data from ${chromeProfileData.userDataDir}.`
     : "No Chrome profiles were found on this computer.";
 
+  renderAuthState();
+
   readinessList.replaceChildren(
     ...currentReadiness.checks.map((check) => {
       const item = document.createElement("li");
@@ -242,6 +247,16 @@ function renderSettings(settingsPayload) {
       return item;
     }),
   );
+}
+
+function renderAuthState(message) {
+  const penut = currentReadiness.checks.find((check) => check.id === "penutConnection");
+  const signedIn = Boolean(penut?.ready);
+  authHelp.textContent = message || penut?.message || "Sign in to load and run your assigned browser tasks.";
+  signInBtn.classList.toggle("hidden", signedIn);
+  signOutBtn.classList.toggle("hidden", !signedIn);
+  signInBtn.disabled = false;
+  signOutBtn.disabled = false;
 }
 
 function profileStatusText() {
@@ -312,6 +327,49 @@ saveSettingsBtn.addEventListener("click", async () => {
   statusBadge.textContent = "Profile saved";
   statusBadge.className = "badge completed";
 });
+
+signInBtn.addEventListener("click", async () => {
+  signInBtn.disabled = true;
+  try {
+    const auth = await window.penutOperator.startAuth();
+    const codeText = auth.userCode ? ` Code: ${auth.userCode}` : "";
+    renderAuthState(`Finish signing in from the browser window.${codeText}`);
+    startAuthPolling();
+  } catch (error) {
+    renderAuthState(error.message || "Could not start sign-in. Try again.");
+    signInBtn.disabled = false;
+  }
+});
+
+signOutBtn.addEventListener("click", async () => {
+  signOutBtn.disabled = true;
+  stopAuthPolling();
+  renderSettings(await window.penutOperator.logoutAuth());
+  render(await window.penutOperator.getTask());
+});
+
+function startAuthPolling() {
+  stopAuthPolling();
+  authPollTimer = setInterval(async () => {
+    const result = await window.penutOperator.pollAuth();
+    if (result.pending) return;
+    stopAuthPolling();
+    if (result.authenticated && result.settings) {
+      renderSettings(result.settings);
+      render(await window.penutOperator.getTask());
+      statusBadge.textContent = "Signed in";
+      statusBadge.className = "badge completed";
+      return;
+    }
+    renderAuthState(result.error || "Sign-in was not completed. Try again.");
+  }, 2500);
+}
+
+function stopAuthPolling() {
+  if (!authPollTimer) return;
+  clearInterval(authPollTimer);
+  authPollTimer = null;
+}
 
 approveBtn.addEventListener("click", async () => {
   if (runInProgress) return;

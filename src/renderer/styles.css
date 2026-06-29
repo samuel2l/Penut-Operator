@@ -273,6 +273,28 @@ nav {
   line-height: 1.5;
 }
 
+.auth-card {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin-bottom: 18px;
+  padding: 14px;
+  background: #f8fbff;
+}
+
+.auth-card p {
+  margin: 6px 0 0;
+}
+
+.auth-actions {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+
 .readiness-list {
   display: grid;
   gap: 10px;

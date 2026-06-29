@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld("penutOperator", {
   approveTask: () => ipcRenderer.invoke("tasks:approve"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   updateSettings: (patch) => ipcRenderer.invoke("settings:update", patch),
+  startAuth: () => ipcRenderer.invoke("auth:start"),
+  pollAuth: () => ipcRenderer.invoke("auth:poll"),
+  logoutAuth: () => ipcRenderer.invoke("auth:logout"),
   runAgent: (prompt) => ipcRenderer.invoke("agent:run", prompt),
   stopAgent: () => ipcRenderer.invoke("agent:stop"),
   onTaskChanged: (handler) => {

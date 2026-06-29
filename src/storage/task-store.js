@@ -6,7 +6,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "../..");
 const DATA_DIR = path.join(ROOT, "data");
 const TASK_FILE = path.join(DATA_DIR, "active-task.json");
-const SEED_FILE = path.join(ROOT, "fixtures", "sample-task.json");
 const MAX_EVENTS = 100;
 const MAX_TASKS = 50;
 let cachedState;
@@ -22,7 +21,6 @@ export function createTaskStore() {
     setSyncError,
     updateTask,
     updateActiveTask,
-    resetActiveTask,
     appendEvent,
   };
 }
@@ -34,7 +32,7 @@ async function getState() {
     return cachedState;
   } catch {
     if (cachedState) return cachedState;
-    return resetActiveTask();
+    return emptyState();
   }
 }
 
@@ -65,8 +63,8 @@ async function createTask(prompt = "") {
     const task = {
       id: `task_${crypto.randomUUID()}`,
       status: "pending",
-      requestedBy: "Penut Agent",
-      accountOwner: "Account owner",
+      requestedBy: "You",
+      accountOwner: "Assigned to you",
       prompt: String(prompt || "").trim(),
       createdAt: now,
       updatedAt: now,
@@ -154,21 +152,6 @@ async function updateTask(taskId, patch) {
   });
 }
 
-async function resetActiveTask() {
-  return enqueueTaskWrite(async () => {
-    const task = await makeSeedTask();
-    const state = {
-      version: 2,
-      selectedTaskId: task.id,
-      syncError: null,
-      tasks: [task],
-      updatedAt: new Date().toISOString(),
-    };
-    await writeState(state);
-    return state;
-  });
-}
-
 async function appendEvent(event, taskId) {
   return enqueueTaskWrite(async () => {
     const state = await readState();
@@ -191,7 +174,7 @@ async function ensureTaskFile() {
   try {
     await readTaskFile();
   } catch {
-    if (!cachedState) await resetActiveTask();
+    if (!cachedState) await writeState(emptyState());
   }
 }
 
@@ -220,13 +203,13 @@ function normalizeState(raw) {
     };
   }
 
-  const task = normalizeTask(raw || makeEmptyTask());
+  const task = raw ? normalizeTask(raw) : null;
   return {
     version: 2,
-    selectedTaskId: task.id,
+    selectedTaskId: task?.id || null,
     syncError: null,
-    tasks: [task],
-    updatedAt: task.updatedAt || new Date().toISOString(),
+    tasks: task ? [task] : [],
+    updatedAt: task?.updatedAt || new Date().toISOString(),
   };
 }
 
@@ -237,9 +220,15 @@ function normalizeTask(task) {
     remoteId: task.remoteId || null,
     approvalRequestId: task.approvalRequestId || null,
     approvalActionId: task.approvalActionId || null,
+    pendingTerminalUpdate:
+      task.pendingTerminalUpdate &&
+      typeof task.pendingTerminalUpdate === "object" &&
+      !Array.isArray(task.pendingTerminalUpdate)
+        ? task.pendingTerminalUpdate
+        : null,
     status: task.status || "pending",
-    requestedBy: task.requestedBy || "Penut Agent",
-    accountOwner: task.accountOwner || "Account owner",
+    requestedBy: task.requestedBy || "You",
+    accountOwner: task.accountOwner || "Assigned to you",
     prompt: task.prompt || "",
     createdAt: task.createdAt || now,
     updatedAt: task.updatedAt || task.createdAt || now,
@@ -261,7 +250,7 @@ function normalizeRemoteTask(task, existingTask) {
     approvalRequestId: task.approvalRequestId || null,
     approvalActionId: task.approvalActionId || null,
     status,
-    requestedBy: task.requestedByMemberId ? "Penut" : "Penut Agent",
+    requestedBy: task.requestedByMemberId ? "You" : "Penut",
     accountOwner: "Assigned to you",
     prompt,
     createdAt: task.createdAt || now,
@@ -301,32 +290,13 @@ function replaceTask(state, nextTask, updatedAt) {
   };
 }
 
-async function makeSeedTask() {
-  await mkdir(DATA_DIR, { recursive: true });
-  const seed = JSON.parse(await readFile(SEED_FILE, "utf8"));
-  return normalizeTask({
-    ...seed,
-    updatedAt: new Date().toISOString(),
-    events: [
-      makeEvent({
-        type: "system",
-        message: "Loaded sample task.",
-      }),
-    ],
-  });
-}
-
-function makeEmptyTask() {
-  const now = new Date().toISOString();
+function emptyState() {
   return {
-    id: `task_${crypto.randomUUID()}`,
-    status: "pending",
-    requestedBy: "Penut Agent",
-    accountOwner: "Account owner",
-    prompt: "",
-    createdAt: now,
-    updatedAt: now,
-    events: [],
+    version: 2,
+    selectedTaskId: null,
+    syncError: null,
+    tasks: [],
+    updatedAt: new Date().toISOString(),
   };
 }
 

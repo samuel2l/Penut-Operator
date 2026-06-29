@@ -91,7 +91,18 @@
           <article class="panel settings-panel">
             <div class="section-title">
               <h2>Operator setup</h2>
-              <p>Operator reuses your Penut CLI login and Chrome profile when it runs approved tasks.</p>
+              <p>Sign in to Penut, then choose the Chrome profile Operator should use for browser tasks.</p>
+            </div>
+
+            <div class="auth-card">
+              <div>
+                <strong>Penut account</strong>
+                <p id="authHelp" class="help-text">Sign in to load and run your assigned browser tasks.</p>
+              </div>
+              <div class="auth-actions">
+                <button id="signInBtn" class="primary" type="button">Sign in to Penut</button>
+                <button id="signOutBtn" class="secondary hidden" type="button">Sign out</button>
+              </div>
             </div>
 
             <label class="field">
@@ -100,6 +111,7 @@
             </label>
 
             <p id="profileHelp" class="help-text"></p>
+            <p class="help-text">Operator uses this Chrome profile so it can work with accounts you are already signed into. It may open or focus Chrome while a task is running.</p>
 
             <div class="actions">
               <button id="saveSettingsBtn" class="primary">Save profile</button>
