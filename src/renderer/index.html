@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Penut Operator</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260629-auth-empty-state" />
   </head>
   <body>
     <main class="app-shell">
@@ -43,6 +43,11 @@
               <button id="newTaskBtn" class="secondary compact">New</button>
             </div>
             <ol id="taskList" class="task-list"></ol>
+            <div id="listEmptyState" class="list-empty-state">
+              <h3>Sign in to Penut</h3>
+              <p>Sign in to load browser tasks assigned to you and create new tasks from Operator.</p>
+              <button id="listEmptyActionBtn" class="primary" type="button">Sign in to Penut</button>
+            </div>
           </article>
         </section>
 
@@ -130,6 +135,6 @@
       </section>
     </main>
 
-    <script src="./renderer.js" type="module"></script>
+    <script src="./renderer.js?v=20260629-auth-empty-state" type="module"></script>
   </body>
 </html>

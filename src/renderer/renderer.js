@@ -7,6 +7,8 @@ const settingsScreen = document.querySelector("#settingsScreen");
 const taskDetails = document.querySelector("#taskDetails");
 const emptyState = document.querySelector("#emptyState");
 const emptyActionBtn = document.querySelector("#emptyActionBtn");
+const listEmptyState = document.querySelector("#listEmptyState");
+const listEmptyActionBtn = document.querySelector("#listEmptyActionBtn");
 const emptyActivity = document.querySelector("#emptyActivity");
 const taskList = document.querySelector("#taskList");
 const refreshTasksBtn = document.querySelector("#refreshTasksBtn");
@@ -121,18 +123,26 @@ function render(state) {
   if (!task) {
     taskDetails.classList.add("hidden");
     emptyState.classList.toggle("hidden", !isDetail);
+    listEmptyState.classList.toggle("hidden", isDetail || isSettings);
     const syncState = describeSyncState(state);
     const emptyTitle = emptyState.querySelector("h2");
     const emptyMessage = emptyState.querySelector("p");
+    const listEmptyTitle = listEmptyState.querySelector("h3");
+    const listEmptyMessage = listEmptyState.querySelector("p");
     if (emptyTitle) emptyTitle.textContent = syncState.title;
     if (emptyMessage) {
       emptyMessage.textContent = syncState.message;
     }
+    if (listEmptyTitle) listEmptyTitle.textContent = syncState.title;
+    if (listEmptyMessage) listEmptyMessage.textContent = syncState.message;
     statusBadge.textContent = syncState.badge;
     statusBadge.className = syncState.badgeClass;
     emptyActionBtn.textContent = syncState.actionLabel || "";
     emptyActionBtn.classList.toggle("hidden", !syncState.action);
     emptyActionBtn.dataset.action = syncState.action || "";
+    listEmptyActionBtn.textContent = syncState.actionLabel || "";
+    listEmptyActionBtn.classList.toggle("hidden", !syncState.action);
+    listEmptyActionBtn.dataset.action = syncState.action || "";
     taskList.replaceChildren();
     return;
   }
@@ -141,6 +151,7 @@ function render(state) {
 
   taskDetails.classList.toggle("hidden", !isDetail);
   emptyState.classList.add("hidden");
+  listEmptyState.classList.add("hidden");
 
   if (!isDetail) {
     statusBadge.textContent = isSettings
@@ -374,6 +385,7 @@ saveSettingsBtn.addEventListener("click", async () => {
 async function startSignIn() {
   signInBtn.disabled = true;
   emptyActionBtn.disabled = true;
+  listEmptyActionBtn.disabled = true;
   try {
     const auth = await window.penutOperator.startAuth();
     const codeText = auth.userCode ? ` Code: ${auth.userCode}` : "";
@@ -383,23 +395,32 @@ async function startSignIn() {
     renderAuthState(error.message || "Could not start sign-in. Try again.");
     signInBtn.disabled = false;
     emptyActionBtn.disabled = false;
+    listEmptyActionBtn.disabled = false;
   }
 }
 
 signInBtn.addEventListener("click", startSignIn);
 
 emptyActionBtn.addEventListener("click", async () => {
-  if (emptyActionBtn.dataset.action === "sign_in") {
+  await handleEmptyAction(emptyActionBtn.dataset.action);
+});
+
+listEmptyActionBtn.addEventListener("click", async () => {
+  await handleEmptyAction(listEmptyActionBtn.dataset.action);
+});
+
+async function handleEmptyAction(action) {
+  if (action === "sign_in") {
     setScreen("settings");
     renderSettings(await window.penutOperator.getSettings());
     render(currentState);
     await startSignIn();
     return;
   }
-  if (emptyActionBtn.dataset.action === "refresh") {
+  if (action === "refresh") {
     await refreshTasks();
   }
-});
+}
 
 signOutBtn.addEventListener("click", async () => {
   signOutBtn.disabled = true;
