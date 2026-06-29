@@ -6,7 +6,6 @@ contextBridge.exposeInMainWorld("penutOperator", {
   createTask: (prompt) => ipcRenderer.invoke("tasks:create", prompt),
   updateTask: (patch) => ipcRenderer.invoke("tasks:update", patch),
   approveTask: () => ipcRenderer.invoke("tasks:approve"),
-  resetTask: () => ipcRenderer.invoke("tasks:reset"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   updateSettings: (patch) => ipcRenderer.invoke("settings:update", patch),
   runAgent: (prompt) => ipcRenderer.invoke("agent:run", prompt),

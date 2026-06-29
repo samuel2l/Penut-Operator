@@ -17,7 +17,6 @@ const chromeProfileSelect = document.querySelector("#chromeProfileSelect");
 const profileHelp = document.querySelector("#profileHelp");
 const saveSettingsBtn = document.querySelector("#saveSettingsBtn");
 const readinessList = document.querySelector("#readinessList");
-const resetBtn = document.querySelector("#resetBtn");
 const approveBtn = document.querySelector("#approveBtn");
 const stopBtn = document.querySelector("#stopBtn");
 let runInProgress = false;
@@ -156,7 +155,6 @@ function render(state) {
   stopBtn.disabled = !currentTaskRunning;
   newTaskBtn.disabled = runInProgress;
   refreshTasksBtn.disabled = runInProgress || refreshInProgress;
-  resetBtn.disabled = runInProgress;
 
   taskList.replaceChildren(
     ...(state.tasks || []).map((item) => {
@@ -273,11 +271,6 @@ async function refreshTasks() {
 
 taskPrompt.addEventListener("input", () => {
   promptDirty = true;
-});
-
-resetBtn.addEventListener("click", async () => {
-  promptDirty = false;
-  render(await window.penutOperator.resetTask());
 });
 
 newTaskBtn.addEventListener("click", async () => {

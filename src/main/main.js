@@ -90,8 +90,6 @@ ipcMain.handle("tasks:approve", async () => {
   return state;
 });
 
-ipcMain.handle("tasks:reset", async () => taskStore.resetActiveTask());
-
 ipcMain.handle("settings:get", async () => {
   const settings = await settingsStore.getSettings();
   return {
