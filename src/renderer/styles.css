@@ -259,6 +259,19 @@ nav {
   gap: 12px;
 }
 
+.queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.selection-help {
+  margin: -4px 0 18px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .task-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -270,8 +283,11 @@ nav {
 
 .task-card {
   display: grid;
-  gap: 6px;
+  gap: 12px;
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 14px;
@@ -280,8 +296,57 @@ nav {
   text-align: left;
 }
 
-.task-card:hover:not(:disabled),
+.task-card:hover,
+.task-card:focus,
 .task-card.selected {
+  border-color: #b8c7dc;
+  background: #f8fbff;
+}
+
+.task-card:focus {
+  outline: 2px solid rgba(47, 111, 237, 0.28);
+  outline-offset: 2px;
+}
+
+.task-card.selected-for-run {
+  border-color: #2f6fed;
+  background: #f3f7ff;
+}
+
+.task-card-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.task-card-row input {
+  margin-top: 2px;
+}
+
+.task-card-title {
+  display: -webkit-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  word-break: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.task-open-button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 9px;
+  background: #ffffff;
+  color: #2f6fed;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.task-open-button:hover {
   border-color: #b8c7dc;
   background: #f8fbff;
 }
@@ -295,6 +360,7 @@ nav {
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
+  overflow-wrap: break-word;
 }
 
 .help-text {

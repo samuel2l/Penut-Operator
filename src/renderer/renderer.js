@@ -13,6 +13,8 @@ const emptyActivity = document.querySelector("#emptyActivity");
 const taskList = document.querySelector("#taskList");
 const refreshTasksBtn = document.querySelector("#refreshTasksBtn");
 const newTaskBtn = document.querySelector("#newTaskBtn");
+const runSelectedBtn = document.querySelector("#runSelectedBtn");
+const selectionHelp = document.querySelector("#selectionHelp");
 const backBtn = document.querySelector("#backBtn");
 const approvalsNavBtn = document.querySelector("#approvalsNavBtn");
 const settingsNavBtn = document.querySelector("#settingsNavBtn");
@@ -27,6 +29,7 @@ const signInBtn = document.querySelector("#signInBtn");
 const reopenAuthBtn = document.querySelector("#reopenAuthBtn");
 const cancelAuthBtn = document.querySelector("#cancelAuthBtn");
 const signOutBtn = document.querySelector("#signOutBtn");
+const saveTaskBtn = document.querySelector("#saveTaskBtn");
 const approveBtn = document.querySelector("#approveBtn");
 const stopBtn = document.querySelector("#stopBtn");
 let runInProgress = false;
@@ -42,6 +45,7 @@ let currentReadiness = { ready: false, checks: [] };
 let currentPendingAuth;
 let refreshInProgress = false;
 let authPollTimer;
+let selectedRunTaskIds = new Set();
 
 function humanStatus(status) {
   return String(status || "unknown").replaceAll("_", " ");
@@ -52,9 +56,9 @@ function readableStatus(status) {
   const map = {
     draft: "Draft",
     pending: "Waiting for approval",
-    approved: "Approved",
+    approved: "Ready",
     running: "Working",
-    completed: "Completed",
+    completed: "Done",
     failed: "Needs attention",
     stopped: "Stopped",
     rejected: "Rejected",
@@ -102,6 +106,10 @@ function friendlyEventDetail(event) {
 
 function selectedTask(state) {
   return state?.tasks?.find((task) => task.id === state.selectedTaskId) || state?.tasks?.[0];
+}
+
+function taskCanRun(task) {
+  return ["approved", "failed", "stopped", "expired"].includes(task?.status);
 }
 
 function taskPreview(task) {
@@ -153,6 +161,11 @@ function render(state) {
   }
   selectedTaskId = task.id;
   const currentTaskRunning = task.status === "running";
+  const runnableTasks = (state.tasks || []).filter(taskCanRun);
+  selectedRunTaskIds = new Set(
+    [...selectedRunTaskIds].filter((taskId) => runnableTasks.some((item) => item.id === taskId)),
+  );
+  const selectedRunCount = selectedRunTaskIds.size;
 
   taskDetails.classList.toggle("hidden", !isDetail);
   emptyState.classList.add("hidden");
@@ -175,29 +188,76 @@ function render(state) {
 
   const canEdit = ["pending", "approved", "failed", "stopped"].includes(task.status);
   taskPrompt.disabled = !canEdit;
+  saveTaskBtn.disabled = runInProgress || !canEdit || !promptDirty;
   approveBtn.disabled = runInProgress || !["pending", "approved", "failed", "stopped"].includes(task.status);
   stopBtn.disabled = !currentTaskRunning;
   newTaskBtn.disabled = runInProgress;
+  runSelectedBtn.disabled = runInProgress || selectedRunCount === 0;
+  runSelectedBtn.textContent =
+    selectedRunCount > 1 ? `Run ${selectedRunCount} selected` : "Run selected";
+  selectionHelp.textContent = selectedRunCount
+    ? `${selectedRunCount} task${selectedRunCount === 1 ? "" : "s"} selected. Operator will run them one after another.`
+    : runnableTasks.length
+      ? "Select ready tasks to run them one after another."
+      : "No ready tasks are available to run.";
   refreshTasksBtn.disabled = runInProgress || refreshInProgress;
 
   taskList.replaceChildren(
     ...(state.tasks || []).map((item) => {
       const li = document.createElement("li");
-      const button = document.createElement("button");
+      const card = document.createElement("article");
+      const row = document.createElement("div");
+      const checkbox = document.createElement("input");
       const title = document.createElement("strong");
+      const openButton = document.createElement("button");
       const meta = document.createElement("span");
+      const canRun = taskCanRun(item);
 
-      button.type = "button";
-      button.className = "task-card";
+      card.className = "task-card";
+      card.tabIndex = canRun && !runInProgress ? 0 : -1;
+      card.role = canRun ? "checkbox" : "group";
+      card.ariaChecked = canRun ? String(selectedRunTaskIds.has(item.id)) : undefined;
+      card.classList.toggle("selected-for-run", selectedRunTaskIds.has(item.id));
+      checkbox.type = "checkbox";
+      checkbox.checked = selectedRunTaskIds.has(item.id);
+      checkbox.disabled = runInProgress || !canRun;
+      checkbox.ariaLabel = `Select ${taskPreview(item)} to run`;
+      title.className = "task-card-title";
       title.textContent = taskPreview(item);
+      openButton.type = "button";
+      openButton.className = "task-open-button";
+      openButton.textContent = "Open";
       meta.textContent = `${readableStatus(item.status)} · ${timeAgo(new Date(item.updatedAt || item.createdAt))}`;
-      button.append(title, meta);
-      button.addEventListener("click", async () => {
+      row.className = "task-card-row";
+      row.append(checkbox, title, openButton);
+      card.append(row, meta);
+      checkbox.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (!canRun) return;
+        if (checkbox.checked) selectedRunTaskIds.add(item.id);
+        else selectedRunTaskIds.delete(item.id);
+        render(currentState);
+      });
+      openButton.addEventListener("click", async (event) => {
+        event.stopPropagation();
         setScreen("detail");
         promptDirty = false;
         render(await window.penutOperator.selectTask(item.id));
       });
-      li.append(button);
+      card.addEventListener("click", () => {
+        if (runInProgress || !canRun) return;
+        if (selectedRunTaskIds.has(item.id)) selectedRunTaskIds.delete(item.id);
+        else selectedRunTaskIds.add(item.id);
+        render(currentState);
+      });
+      card.addEventListener("keydown", (event) => {
+        if (!["Enter", " "].includes(event.key) || runInProgress || !canRun) return;
+        event.preventDefault();
+        if (selectedRunTaskIds.has(item.id)) selectedRunTaskIds.delete(item.id);
+        else selectedRunTaskIds.add(item.id);
+        render(currentState);
+      });
+      li.append(card);
       return li;
     }),
   );
@@ -408,6 +468,32 @@ backBtn.addEventListener("click", () => {
 
 refreshTasksBtn.addEventListener("click", refreshTasks);
 
+runSelectedBtn.addEventListener("click", async () => {
+  if (runInProgress || selectedRunTaskIds.size === 0) return;
+  runInProgress = true;
+  runSelectedBtn.disabled = true;
+  try {
+    const orderedTaskIds = (currentState?.tasks || [])
+      .filter((task) => selectedRunTaskIds.has(task.id) && taskCanRun(task))
+      .map((task) => task.id);
+    const result = await window.penutOperator.runTasks(orderedTaskIds, {});
+    selectedRunTaskIds.clear();
+    if (result.state) render(result.state);
+    if (!result.ok && result.error) {
+      statusBadge.textContent = userFacingError(result.error, "Operator could not run the selected tasks.");
+      statusBadge.className = "badge failed";
+      if (/before running tasks|setup|install|model access/i.test(result.error)) {
+        setScreen("settings");
+        renderSettings(await window.penutOperator.getSettings());
+        render(currentState);
+      }
+    }
+  } finally {
+    runInProgress = false;
+    render(await window.penutOperator.getTask());
+  }
+});
+
 approvalsNavBtn.addEventListener("click", () => {
   setScreen("list");
   promptDirty = false;
@@ -555,6 +641,19 @@ function stopAuthPolling() {
   clearInterval(authPollTimer);
   authPollTimer = null;
 }
+
+saveTaskBtn.addEventListener("click", async () => {
+  if (runInProgress) return;
+  const prompt = taskPrompt.value.trim();
+  if (!prompt) return;
+  taskPrompt.value = prompt;
+  lastRenderedPrompt = prompt;
+  promptDirty = false;
+  saveTaskBtn.disabled = true;
+  render(await window.penutOperator.updateTask({ prompt }));
+  statusBadge.textContent = "Changes saved";
+  statusBadge.className = "badge completed";
+});
 
 approveBtn.addEventListener("click", async () => {
   if (runInProgress) return;

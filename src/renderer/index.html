@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Penut Operator</title>
-    <link rel="stylesheet" href="./styles.css?v=20260629-auth-empty-state" />
+    <link rel="stylesheet" href="./styles.css?v=20260630-card-grid-fix" />
   </head>
   <body>
     <main class="app-shell">
@@ -18,7 +18,6 @@
         </div>
         <nav>
           <button id="approvalsNavBtn" class="nav-item active">Approvals</button>
-          <button class="nav-item" disabled>History</button>
           <button id="settingsNavBtn" class="nav-item">Settings</button>
         </nav>
       </aside>
@@ -37,11 +36,15 @@
             <div class="section-title queue-title">
               <div>
                 <h2>Approval tasks</h2>
-                <p>Select a task to review the details and activity.</p>
+                <p>Select one or more ready tasks, then run them in order.</p>
               </div>
-              <button id="refreshTasksBtn" class="secondary compact">Refresh</button>
-              <button id="newTaskBtn" class="secondary compact">New</button>
+              <div class="queue-actions">
+                <button id="runSelectedBtn" class="primary compact" type="button">Run selected</button>
+                <button id="refreshTasksBtn" class="secondary compact">Refresh</button>
+                <button id="newTaskBtn" class="secondary compact">New</button>
+              </div>
             </div>
+            <p id="selectionHelp" class="selection-help">Select ready tasks to run them one after another.</p>
             <ol id="taskList" class="task-list"></ol>
             <div id="listEmptyState" class="list-empty-state">
               <h3>Sign in to Penut</h3>
@@ -59,7 +62,7 @@
               <div class="detail-heading">
                 <div class="section-title">
                   <h2>Task details</h2>
-                  <p>Edit the request, then approve it to let the agent get to work.</p>
+                  <p>Edit and save the request, then return to the list to select tasks or run this one now.</p>
                 </div>
               </div>
 
@@ -69,7 +72,8 @@
               </label>
 
               <div class="actions">
-                <button id="approveBtn" class="primary">Approve</button>
+                <button id="saveTaskBtn" class="secondary">Save changes</button>
+                <button id="approveBtn" class="primary">Run this task</button>
                 <button id="stopBtn" class="danger">Stop</button>
               </div>
             </article>
@@ -138,6 +142,6 @@
       </section>
     </main>
 
-    <script src="./renderer.js?v=20260629-auth-empty-state" type="module"></script>
+    <script src="./renderer.js?v=20260630-card-grid-fix" type="module"></script>
   </body>
 </html>

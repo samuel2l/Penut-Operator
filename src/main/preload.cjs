@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("penutOperator", {
   pollAuth: () => ipcRenderer.invoke("auth:poll"),
   logoutAuth: () => ipcRenderer.invoke("auth:logout"),
   runAgent: (prompt) => ipcRenderer.invoke("agent:run", prompt),
+  runTasks: (taskIds, promptByTaskId) => ipcRenderer.invoke("agent:run-tasks", taskIds, promptByTaskId),
   stopAgent: () => ipcRenderer.invoke("agent:stop"),
   onTaskChanged: (handler) => {
     const listener = (_event, task) => handler(task);

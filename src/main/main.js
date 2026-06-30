@@ -278,27 +278,104 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
   if (activeRun) {
     return { ok: false, error: "An Operator run is already active." };
   }
-
-  const settings = await settingsStore.getSettings();
-  const readiness = await getRunReadiness(settings);
   const currentTask = await taskStore.getActiveTask();
   if (!currentTask) {
     return { ok: false, error: "Create or select a task before approving it." };
   }
-  const blocker = readiness.checks.find((check) => !check.ready);
-  if (blocker) {
-    return { ok: false, error: blocker.action };
+  return runSelectedTasks([currentTask.id], { [currentTask.id]: prompt }, {
+    allowDetailRun: true,
+  });
+});
+
+ipcMain.handle("agent:run-tasks", async (_event, taskIds, promptByTaskId = {}) => {
+  if (activeRun) {
+    return { ok: false, error: "An Operator run is already active." };
+  }
+  return runSelectedTasks(taskIds, promptByTaskId);
+});
+
+async function runSelectedTasks(taskIds, promptByTaskId = {}, options = {}) {
+  const selectedIds = Array.isArray(taskIds)
+    ? [...new Set(taskIds.filter((id) => typeof id === "string" && id))]
+    : [];
+  if (!selectedIds.length) {
+    return { ok: false, error: "Select at least one ready task to run." };
   }
 
-  const cleanPrompt = String(prompt || currentTask.prompt || "").trim();
-  let task = await taskStore.updateActiveTask({
+  const state = await taskStore.getState();
+  const tasksById = new Map(state.tasks.map((task) => [task.id, task]));
+  const tasks = selectedIds.map((id) => tasksById.get(id)).filter(Boolean);
+  const blockedTask = tasks.find((task) => !taskCanRun(task, options));
+  if (blockedTask) {
+    return {
+      ok: false,
+      error: "Only ready or retryable tasks can be selected.",
+      state,
+    };
+  }
+
+  const settings = await settingsStore.getSettings();
+  const readiness = await getRunReadiness(settings);
+  const blocker = readiness.checks.find((check) => !check.ready);
+  if (blocker) {
+    return { ok: false, error: blocker.action, state };
+  }
+
+  const results = [];
+  for (const task of tasks) {
+    await taskStore.selectTask(task.id);
+    const prompt = promptByTaskId && typeof promptByTaskId === "object"
+      ? promptByTaskId[task.id]
+      : undefined;
+    const result = await runOneTask(task.id, prompt, settings);
+    results.push(result);
+    if (result.stopped) {
+      return {
+        ok: false,
+        stopped: true,
+        results,
+        state: await taskStore.getState(),
+      };
+    }
+  }
+
+  return {
+    ok: results.every((result) => result.ok),
+    results,
+    state: await taskStore.getState(),
+  };
+}
+
+function taskCanRun(task, options = {}) {
+  if (options.allowDetailRun) {
+    return ["pending", "approved", "failed", "stopped"].includes(task?.status);
+  }
+  return ["approved", "failed", "stopped", "expired"].includes(task?.status);
+}
+
+async function runOneTask(taskId, prompt, settings) {
+  const existing = (await taskStore.getState()).tasks.find((task) => task.id === taskId);
+  if (!existing) {
+    return { ok: false, error: "Task is no longer available." };
+  }
+
+  const cleanPrompt = String(prompt || existing.prompt || "").trim();
+  const shouldApproveRemoteTask =
+    existing.remoteId &&
+    existing.status === "pending";
+  const shouldRetryRemoteTask =
+    existing.remoteId &&
+    ["failed", "stopped", "expired"].includes(existing.status);
+  let task = await taskStore.updateTask(taskId, {
     prompt: cleanPrompt,
     status: "approved",
   });
 
   const penutClient = createPenutApiClient(settings, { authStore });
   if (task.remoteId && penutClient.isConfigured) {
-    if (task.status !== "approved") {
+    if (shouldRetryRemoteTask) {
+      await penutClient.retryTask(task.remoteId, { editedPrompt: cleanPrompt });
+    } else if (shouldApproveRemoteTask) {
       await penutClient.approveTask(task.remoteId, { editedPrompt: cleanPrompt });
     }
   } else if (!task.remoteId && penutClient.isConfigured) {
@@ -333,7 +410,7 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
     stopped: false,
     stop: () => {},
   };
-  await taskStore.updateActiveTask({ status: "running" });
+  await taskStore.updateTask(task.id, { status: "running" });
   mainWindow?.webContents.send("tasks:changed", await taskStore.getState());
 
   try {
@@ -351,8 +428,7 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
       }
     });
     if (activeRun?.taskId === task.id && activeRun.stopped) {
-      const state = await taskStore.getState();
-      return { ok: false, stopped: true, state };
+      return { ok: false, stopped: true, state: await taskStore.getState() };
     }
     const status = result.ok ? "completed" : "failed";
     if (task.remoteId && penutClient.isConfigured) {
@@ -372,12 +448,10 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
       });
     }
     const updatedTask = await taskStore.updateTask(task.id, { status });
-    const state = await taskStore.getState();
-    return { ...result, task: updatedTask, state };
+    return { ...result, task: updatedTask, state: await taskStore.getState() };
   } catch (error) {
     if (activeRun?.taskId === task.id && activeRun.stopped) {
-      const state = await taskStore.getState();
-      return { ok: false, stopped: true, state };
+      return { ok: false, stopped: true, state: await taskStore.getState() };
     }
     if (task.remoteId && penutClient.isConfigured) {
       const terminalUpdate = {
@@ -396,13 +470,12 @@ ipcMain.handle("agent:run", async (_event, prompt) => {
       detail: { failed: true },
     }, task.id);
     const updatedTask = await taskStore.updateTask(task.id, { status: "failed" });
-    const state = await taskStore.getState();
-    return { ok: false, error: error.message, task: updatedTask, state };
+    return { ok: false, error: error.message, task: updatedTask, state: await taskStore.getState() };
   } finally {
     activeRun = null;
     mainWindow?.webContents.send("tasks:changed", await taskStore.getState());
   }
-});
+}
 
 ipcMain.handle("agent:stop", async () => {
   if (!activeRun) return { ok: true };

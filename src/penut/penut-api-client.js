@@ -53,6 +53,11 @@ export function createPenutApiClient(settings = {}, options = {}) {
         method: "POST",
         body: input,
       }),
+    retryTask: (taskId, input = {}) =>
+      request(`/browser/tasks/${encodeURIComponent(taskId)}/retry`, {
+        method: "POST",
+        body: input,
+      }),
     rejectTask: (taskId, input = {}) =>
       request(`/browser/tasks/${encodeURIComponent(taskId)}/reject`, {
         method: "POST",
