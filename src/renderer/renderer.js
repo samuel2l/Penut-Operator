@@ -21,7 +21,12 @@ const profileHelp = document.querySelector("#profileHelp");
 const saveSettingsBtn = document.querySelector("#saveSettingsBtn");
 const readinessList = document.querySelector("#readinessList");
 const authHelp = document.querySelector("#authHelp");
+const authCard = document.querySelector(".auth-card");
+const authSteps = document.querySelector("#authSteps");
+const authCode = document.querySelector("#authCode");
 const signInBtn = document.querySelector("#signInBtn");
+const reopenAuthBtn = document.querySelector("#reopenAuthBtn");
+const cancelAuthBtn = document.querySelector("#cancelAuthBtn");
 const signOutBtn = document.querySelector("#signOutBtn");
 const approveBtn = document.querySelector("#approveBtn");
 const stopBtn = document.querySelector("#stopBtn");
@@ -35,6 +40,7 @@ let currentSettings;
 let currentAuth;
 let chromeProfileData = { userDataDir: "", profiles: [] };
 let currentReadiness = { ready: false, checks: [] };
+let currentPendingAuth;
 let refreshInProgress = false;
 let authPollTimer;
 
@@ -299,23 +305,84 @@ function renderSettings(settingsPayload) {
   );
 }
 
-function renderAuthState(message) {
+function renderAuthState(input = {}) {
+  const options = typeof input === "string" ? { message: input, state: "error" } : input;
   const penut = currentReadiness.checks.find((check) => check.id === "penutConnection");
   const signedIn = Boolean(penut?.ready);
+  const state = options.state || (signedIn ? "connected" : "idle");
+  const waiting = state === "waiting";
+  const error = state === "error";
+  const expiresAt = options.expiresAt ? new Date(options.expiresAt) : null;
+  const expiresText =
+    expiresAt instanceof Date && !Number.isNaN(expiresAt.getTime())
+      ? ` ${formatExpiry(expiresAt)}`
+      : "";
+
+  authCard.classList.toggle("waiting", waiting);
+  authCard.classList.toggle("connected", state === "connected");
+  authCard.classList.toggle("error", error);
   authHelp.textContent =
-    message ||
+    options.message ||
     currentAuth?.label ||
     penut?.message ||
     "Sign in to load and run your assigned browser tasks.";
+  if (waiting) {
+    authHelp.textContent =
+      `${options.message || "Waiting for browser approval. Return here after you click Connect Operator."}${expiresText}`;
+  }
+
+  authCode.textContent = options.userCode ? `Code: ${options.userCode}` : "";
+  authCode.classList.toggle("hidden", !options.userCode || !waiting);
+
   signInBtn.classList.toggle("hidden", signedIn);
   signOutBtn.classList.toggle("hidden", !signedIn);
-  signInBtn.disabled = false;
+  reopenAuthBtn.classList.toggle("hidden", !waiting || !options.verificationUrl);
+  cancelAuthBtn.classList.toggle("hidden", !waiting);
+  signInBtn.disabled = waiting;
   signOutBtn.disabled = false;
+  updateAuthSteps(state);
+}
+
+function formatExpiry(date) {
+  const ms = date.getTime() - Date.now();
+  if (ms <= 0) return "This sign-in has expired.";
+  const mins = Math.max(1, Math.ceil(ms / 60000));
+  return `Expires in ${mins} minute${mins === 1 ? "" : "s"}.`;
+}
+
+function updateAuthSteps(state) {
+  const stepStates = {
+    idle: {},
+    waiting: { open: "done", approve: "active" },
+    connected: { open: "done", approve: "done", connected: "done" },
+    error: { open: "done", approve: "failed" },
+  };
+  const classes = stepStates[state] || {};
+  authSteps.querySelectorAll("li").forEach((item) => {
+    item.classList.remove("active", "done", "failed");
+    const next = classes[item.dataset.step];
+    if (next) item.classList.add(next);
+  });
 }
 
 function profileStatusText() {
   if (!currentSettings?.chromeProfileDirectory) return "Setup needed";
   return currentSettings.chromeProfileName || currentSettings.chromeProfileDirectory;
+}
+
+function userFacingError(error, fallback = "Something went wrong. Try again.") {
+  const message = String(error?.message || error || "");
+  if (/Error invoking remote method/i.test(message)) return fallback;
+  if (/Penut request failed \(404\)|not found/i.test(message)) {
+    return "This Penut server does not support that Operator action yet. Update the server, then try again.";
+  }
+  if (/Penut request failed \(\d+\)/i.test(message)) {
+    return "Penut could not complete that request. Try again in a moment.";
+  }
+  if (/fetch failed|network|ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(message)) {
+    return "Cannot reach Penut right now. Check your connection and try again.";
+  }
+  return message || fallback;
 }
 
 async function refresh() {
@@ -324,6 +391,7 @@ async function refresh() {
   }
   renderSettings(await window.penutOperator.getSettings());
   render(await window.penutOperator.getTask());
+  await resumePendingSignIn();
 }
 
 async function refreshTasks() {
@@ -386,13 +454,29 @@ async function startSignIn() {
   signInBtn.disabled = true;
   emptyActionBtn.disabled = true;
   listEmptyActionBtn.disabled = true;
+  renderAuthState({ state: "waiting", message: "Opening the browser approval page..." });
   try {
     const auth = await window.penutOperator.startAuth();
-    const codeText = auth.userCode ? ` Code: ${auth.userCode}` : "";
-    renderAuthState(`Finish signing in from the browser window.${codeText}`);
-    startAuthPolling();
+    if (!auth.ok) {
+      currentPendingAuth = null;
+      renderAuthState({ state: "error", message: auth.error || "Could not start sign-in. Try again." });
+      signInBtn.disabled = false;
+      emptyActionBtn.disabled = false;
+      listEmptyActionBtn.disabled = false;
+      return;
+    }
+    currentPendingAuth = auth;
+    renderAuthState({
+      state: "waiting",
+      message: "Waiting for browser approval. Click Connect Operator in the browser, then return here.",
+      userCode: auth.userCode,
+      verificationUrl: auth.verificationUrl,
+      expiresAt: auth.expiresAt,
+    });
+    startAuthPolling(auth);
   } catch (error) {
-    renderAuthState(error.message || "Could not start sign-in. Try again.");
+    currentPendingAuth = null;
+    renderAuthState({ state: "error", message: userFacingError(error, "Could not start sign-in. Try again.") });
     signInBtn.disabled = false;
     emptyActionBtn.disabled = false;
     listEmptyActionBtn.disabled = false;
@@ -400,6 +484,19 @@ async function startSignIn() {
 }
 
 signInBtn.addEventListener("click", startSignIn);
+
+reopenAuthBtn.addEventListener("click", async () => {
+  const result = await window.penutOperator.openPendingAuth();
+  if (!result.ok) {
+    renderAuthState({ state: "error", message: result.error || "Could not open the approval page. Start sign-in again." });
+  }
+});
+
+cancelAuthBtn.addEventListener("click", async () => {
+  stopAuthPolling();
+  currentPendingAuth = null;
+  renderSettings(await window.penutOperator.cancelAuth());
+});
 
 emptyActionBtn.addEventListener("click", async () => {
   await handleEmptyAction(emptyActionBtn.dataset.action);
@@ -425,30 +522,49 @@ async function handleEmptyAction(action) {
 signOutBtn.addEventListener("click", async () => {
   signOutBtn.disabled = true;
   stopAuthPolling();
+  currentPendingAuth = null;
   renderSettings(await window.penutOperator.logoutAuth());
   render(await window.penutOperator.getTask());
 });
 
-function startAuthPolling() {
+async function resumePendingSignIn() {
+  const pending = await window.penutOperator.getPendingAuth();
+  if (!pending.pending || authPollTimer) return;
+  currentPendingAuth = pending;
+  renderAuthState({
+    state: "waiting",
+    message: "Still waiting for browser approval. If the browser tab closed, open it again.",
+    userCode: pending.userCode,
+    verificationUrl: pending.verificationUrl,
+    expiresAt: pending.expiresAt,
+  });
+  startAuthPolling(pending);
+}
+
+function startAuthPolling(pending = {}) {
   stopAuthPolling();
-  authPollTimer = setInterval(async () => {
+  const poll = async () => {
     try {
       const result = await window.penutOperator.pollAuth();
       if (result.pending) return;
       stopAuthPolling();
       if (result.authenticated && result.settings) {
+        currentPendingAuth = null;
         renderSettings(result.settings);
         render(await window.penutOperator.getTask());
         statusBadge.textContent = "Signed in";
         statusBadge.className = "badge completed";
         return;
       }
-      renderAuthState(result.error || "Sign-in was not completed. Try again.");
+      currentPendingAuth = null;
+      renderAuthState({ state: "error", message: result.error || "Sign-in was not completed. Try again." });
     } catch (error) {
       stopAuthPolling();
-      renderAuthState(error.message || "Could not finish sign-in. Try again.");
+      renderAuthState({ state: "error", message: userFacingError(error, "Could not finish sign-in. Try again.") });
     }
-  }, 2500);
+  };
+  authPollTimer = setInterval(poll, 2500);
+  void poll();
 }
 
 function stopAuthPolling() {
@@ -470,7 +586,7 @@ approveBtn.addEventListener("click", async () => {
     const result = await window.penutOperator.runAgent(prompt);
     if (result.state) render(result.state);
     if (!result.ok && result.error) {
-      statusBadge.textContent = result.error;
+      statusBadge.textContent = userFacingError(result.error, "Operator could not run this task.");
       statusBadge.className = "badge failed";
       if (/before running tasks|setup|install|model access/i.test(result.error)) {
         setScreen("settings");
@@ -490,13 +606,17 @@ stopBtn.addEventListener("click", async () => {
 });
 
 if (window.penutOperator) window.penutOperator.onTaskChanged(render);
-window.addEventListener("focus", refreshTasks);
+window.addEventListener("focus", () => {
+  void resumePendingSignIn();
+  void refreshTasks();
+});
 setInterval(() => {
   if (document.visibilityState === "visible" && currentScreen === "list") {
+    void resumePendingSignIn();
     void refreshTasks();
   }
 }, 15000);
 refresh().catch((error) => {
-  statusBadge.textContent = error.message;
+  statusBadge.textContent = userFacingError(error, "Operator could not load.");
   statusBadge.className = "badge failed";
 });

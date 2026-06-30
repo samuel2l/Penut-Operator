@@ -1,7 +1,7 @@
 import path from "node:path";
 import "dotenv/config";
 import crypto from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import os from "node:os";
 import readline from "node:readline";
@@ -18,6 +18,8 @@ const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const taskStore = createTaskStore();
 const settingsStore = createSettingsStore();
 const authStore = createOperatorAuthStore();
+const DATA_DIR = path.join(path.resolve(__dirname, "../.."), "data");
+const PENDING_DEVICE_LOGIN_FILE = path.join(DATA_DIR, "pending-device-login.json");
 let mainWindow;
 let activeRun;
 let pendingDeviceLogin;
@@ -105,7 +107,24 @@ ipcMain.handle("settings:update", async (_event, patch) => {
 ipcMain.handle("auth:start", async () => {
   const settings = await settingsStore.getSettings();
   const client = createPenutApiClient(settings, { authStore });
-  const authorization = await client.initDeviceLogin();
+  logAuth("start_requested", {
+    apiConfigured: client.hasBaseUrl,
+    hasExistingAccessToken: client.hasAccessToken,
+  });
+  let authorization;
+  try {
+    authorization = await client.initDeviceLogin();
+  } catch (error) {
+    logAuth("start_failed", {
+      error: friendlyPenutConnectionError(error),
+      action: friendlyPenutConnectionAction(error),
+    });
+    return {
+      ok: false,
+      error: friendlyPenutConnectionAction(error),
+      detail: friendlyPenutConnectionError(error),
+    };
+  }
   const deviceCode = authorization.deviceCode || authorization.device_code;
   const verifyUrl =
     authorization.verificationUriComplete ||
@@ -114,25 +133,84 @@ ipcMain.handle("auth:start", async () => {
     authorization.verification_uri;
   pendingDeviceLogin = {
     deviceCode,
+    userCode: authorization.userCode || authorization.user_code || "",
+    verificationUrl: verifyUrl || "",
     expiresAt:
       Date.now() +
       Math.max(1, authorization.expiresIn || authorization.expires_in || 600) *
         1000,
   };
-  if (verifyUrl) await shell.openExternal(verifyUrl);
+  savePendingDeviceLogin(pendingDeviceLogin);
+  logAuth("pending_saved", {
+    userCode: pendingDeviceLogin.userCode,
+    hasVerificationUrl: Boolean(verifyUrl),
+    expiresAt: new Date(pendingDeviceLogin.expiresAt).toISOString(),
+  });
+  if (verifyUrl) {
+    await shell.openExternal(verifyUrl);
+    logAuth("browser_opened", {
+      userCode: pendingDeviceLogin.userCode,
+    });
+  }
   return {
-    userCode: authorization.userCode || authorization.user_code || "",
+    ok: true,
+    userCode: pendingDeviceLogin.userCode,
     verificationUrl: verifyUrl || "",
     expiresAt: new Date(pendingDeviceLogin.expiresAt).toISOString(),
   };
 });
 
+ipcMain.handle("auth:pending", async () => {
+  const pending = getPendingDeviceLogin();
+  if (!pending) return { pending: false };
+  if (Date.now() > pending.expiresAt) {
+    clearPendingDeviceLogin();
+    logAuth("pending_expired", {
+      userCode: pending.userCode || "",
+    });
+    return { pending: false, expired: true };
+  }
+  return {
+    pending: true,
+    userCode: pending.userCode || "",
+    verificationUrl: pending.verificationUrl || "",
+    expiresAt: new Date(pending.expiresAt).toISOString(),
+  };
+});
+
+ipcMain.handle("auth:open-pending", async () => {
+  const pending = getPendingDeviceLogin();
+  if (!pending?.verificationUrl) {
+    logAuth("reopen_missing_url");
+    return { ok: false, error: "No approval page is available. Start sign-in again." };
+  }
+  await shell.openExternal(pending.verificationUrl);
+  logAuth("browser_reopened", {
+    userCode: pending.userCode || "",
+  });
+  return { ok: true };
+});
+
+ipcMain.handle("auth:cancel", async () => {
+  const pending = getPendingDeviceLogin();
+  clearPendingDeviceLogin();
+  logAuth("cancelled", {
+    userCode: pending?.userCode || "",
+  });
+  return settingsPayload();
+});
+
 ipcMain.handle("auth:poll", async () => {
-  if (!pendingDeviceLogin?.deviceCode) {
+  const pending = getPendingDeviceLogin();
+  if (!pending?.deviceCode) {
+    logAuth("poll_no_pending");
     return { authenticated: false, pending: false };
   }
-  if (Date.now() > pendingDeviceLogin.expiresAt) {
-    pendingDeviceLogin = null;
+  if (Date.now() > pending.expiresAt) {
+    clearPendingDeviceLogin();
+    logAuth("poll_expired", {
+      userCode: pending.userCode || "",
+    });
     return {
       authenticated: false,
       pending: false,
@@ -142,13 +220,43 @@ ipcMain.handle("auth:poll", async () => {
   const settings = await settingsStore.getSettings();
   const client = createPenutApiClient(settings, { authStore });
   try {
-    await client.pollDeviceLogin(pendingDeviceLogin.deviceCode);
-    pendingDeviceLogin = null;
-    return { authenticated: true, settings: await settingsPayload() };
+    logAuth("poll_requested", {
+      userCode: pending.userCode || "",
+    });
+    await client.pollDeviceLogin(pending.deviceCode);
+    logAuth("poll_approved_token_saved", {
+      userCode: pending.userCode || "",
+    });
+    const payload = await settingsPayload();
+    if (!payload.auth) {
+      logAuth("session_verify_failed", {
+        userCode: pending.userCode || "",
+      });
+      return {
+        authenticated: false,
+        pending: false,
+        error: "Operator received approval, but could not verify your Penut session. Try signing in again.",
+      };
+    }
+    clearPendingDeviceLogin();
+    logAuth("connected_verified", {
+      account: payload.auth.account || "Signed in",
+      project: payload.auth.project || null,
+    });
+    return { authenticated: true, settings: payload };
   } catch (error) {
-    if (/authorization_pending/i.test(String(error.message))) {
+    if (isAuthorizationPending(error)) {
+      logAuth("poll_pending", {
+        userCode: pending.userCode || "",
+      });
       return { authenticated: false, pending: true };
     }
+    clearPendingDeviceLogin();
+    logAuth("poll_failed", {
+      userCode: pending.userCode || "",
+      error: friendlyPenutConnectionError(error),
+      raw: safeErrorSummary(error),
+    });
     return {
       authenticated: false,
       pending: false,
@@ -161,7 +269,8 @@ ipcMain.handle("auth:logout", async () => {
   const settings = await settingsStore.getSettings();
   const client = createPenutApiClient(settings, { authStore });
   await client.logout();
-  pendingDeviceLogin = null;
+  clearPendingDeviceLogin();
+  logAuth("logged_out");
   return settingsPayload();
 });
 
@@ -391,6 +500,80 @@ async function reconcileTerminalLocalTasks(client, remoteTasks) {
   }));
 }
 
+function getPendingDeviceLogin() {
+  if (pendingDeviceLogin?.deviceCode) return pendingDeviceLogin;
+  try {
+    const raw = JSON.parse(readFileSync(PENDING_DEVICE_LOGIN_FILE, "utf8"));
+    if (!raw?.deviceCode || !raw?.expiresAt) return null;
+    pendingDeviceLogin = {
+      deviceCode: String(raw.deviceCode),
+      userCode: typeof raw.userCode === "string" ? raw.userCode : "",
+      verificationUrl:
+        typeof raw.verificationUrl === "string" ? raw.verificationUrl : "",
+      expiresAt: Number(raw.expiresAt),
+    };
+    return pendingDeviceLogin;
+  } catch {
+    return null;
+  }
+}
+
+function savePendingDeviceLogin(login) {
+  mkdirSync(DATA_DIR, { recursive: true });
+  writeFileSync(PENDING_DEVICE_LOGIN_FILE, `${JSON.stringify(login, null, 2)}\n`, {
+    mode: 0o600,
+  });
+}
+
+function clearPendingDeviceLogin() {
+  pendingDeviceLogin = null;
+  try {
+    unlinkSync(PENDING_DEVICE_LOGIN_FILE);
+  } catch {
+    // Nothing to clear.
+  }
+}
+
+function logAuth(event, detail = {}) {
+  const payload = sanitizeLogDetail(detail);
+  const suffix = Object.keys(payload).length ? ` ${JSON.stringify(payload)}` : "";
+  console.log(`[auth] ${event}${suffix}`);
+}
+
+function sanitizeLogDetail(detail) {
+  if (!detail || typeof detail !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(detail).map(([key, value]) => {
+      if (/^(token|accessToken|refreshToken|deviceCode|secret|key|authorization)$/i.test(key)) {
+        return [key, "[redacted]"];
+      }
+      if (value instanceof Error) return [key, value.message];
+      if (typeof value === "string" && value.length > 160) {
+        return [key, `${value.slice(0, 157)}...`];
+      }
+      return [key, value];
+    }),
+  );
+}
+
+function isAuthorizationPending(error) {
+  const message = String(error?.message || "");
+  const body = error?.body || {};
+  return /authorization[\s_-]?pending/i.test(message) ||
+    /authorization[\s_-]?pending/i.test(String(body.error || "")) ||
+    /authorization[\s_-]?pending/i.test(String(body.error_description || ""));
+}
+
+function safeErrorSummary(error) {
+  const body = error?.body || {};
+  return {
+    status: error?.status || null,
+    message: error?.message || "",
+    error: body.error || null,
+    errorDescription: body.error_description || null,
+  };
+}
+
 async function sendRemoteEventIfNeeded(client, task, event) {
   if (!task.remoteId || !client.isConfigured) return;
   await client.addEvent(task.remoteId, {
@@ -572,6 +755,12 @@ function friendlyPenutConnectionError(error) {
   if (/expired|401|unauthorized|sign in|login/i.test(message)) {
     return "Your Penut session expired. Sign in again to continue.";
   }
+  if (/404|not found/i.test(message)) {
+    return "This Penut server does not support Operator sign-in yet.";
+  }
+  if (/secure storage|cannot save|could not save/i.test(message)) {
+    return "Operator connected, but this computer could not save the sign-in securely.";
+  }
   if (/fetch failed|network|ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(message)) {
     return "Cannot reach Penut right now. Check your connection and try again.";
   }
@@ -588,6 +777,12 @@ function friendlyPenutConnectionAction(error) {
   const message = String(error?.message || "");
   if (/expired|401|unauthorized|sign in|login/i.test(message)) {
     return "Sign in to Penut again from Operator settings.";
+  }
+  if (/404|not found/i.test(message)) {
+    return "Operator sign-in is not available on this Penut server yet. Update the server, then try again.";
+  }
+  if (/secure storage|cannot save|could not save/i.test(message)) {
+    return "Restart Operator and try signing in again. If it keeps happening, check macOS Keychain access.";
   }
   if (/fetch failed|network|ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(message)) {
     return "Check your internet connection, then refresh Operator.";

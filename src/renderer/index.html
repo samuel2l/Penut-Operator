@@ -103,10 +103,18 @@
             <div class="auth-card">
               <div>
                 <strong>Penut account</strong>
+                <ol id="authSteps" class="auth-steps">
+                  <li data-step="open">Open browser</li>
+                  <li data-step="approve">Approve sign-in</li>
+                  <li data-step="connected">Connected</li>
+                </ol>
                 <p id="authHelp" class="help-text">Sign in to load and run your assigned browser tasks.</p>
+                <p id="authCode" class="auth-code hidden"></p>
               </div>
               <div class="auth-actions">
                 <button id="signInBtn" class="primary" type="button">Sign in to Penut</button>
+                <button id="reopenAuthBtn" class="secondary hidden" type="button">Open browser again</button>
+                <button id="cancelAuthBtn" class="secondary hidden" type="button">Cancel sign-in</button>
                 <button id="signOutBtn" class="secondary hidden" type="button">Sign out</button>
               </div>
             </div>
