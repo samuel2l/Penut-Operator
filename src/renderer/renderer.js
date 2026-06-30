@@ -22,7 +22,6 @@ const saveSettingsBtn = document.querySelector("#saveSettingsBtn");
 const readinessList = document.querySelector("#readinessList");
 const authHelp = document.querySelector("#authHelp");
 const authCard = document.querySelector(".auth-card");
-const authSteps = document.querySelector("#authSteps");
 const authCode = document.querySelector("#authCode");
 const signInBtn = document.querySelector("#signInBtn");
 const reopenAuthBtn = document.querySelector("#reopenAuthBtn");
@@ -340,7 +339,6 @@ function renderAuthState(input = {}) {
   cancelAuthBtn.classList.toggle("hidden", !waiting);
   signInBtn.disabled = waiting;
   signOutBtn.disabled = false;
-  updateAuthSteps(state);
 }
 
 function formatExpiry(date) {
@@ -348,21 +346,6 @@ function formatExpiry(date) {
   if (ms <= 0) return "This sign-in has expired.";
   const mins = Math.max(1, Math.ceil(ms / 60000));
   return `Expires in ${mins} minute${mins === 1 ? "" : "s"}.`;
-}
-
-function updateAuthSteps(state) {
-  const stepStates = {
-    idle: {},
-    waiting: { open: "done", approve: "active" },
-    connected: { open: "done", approve: "done", connected: "done" },
-    error: { open: "done", approve: "failed" },
-  };
-  const classes = stepStates[state] || {};
-  authSteps.querySelectorAll("li").forEach((item) => {
-    item.classList.remove("active", "done", "failed");
-    const next = classes[item.dataset.step];
-    if (next) item.classList.add(next);
-  });
 }
 
 function profileStatusText() {

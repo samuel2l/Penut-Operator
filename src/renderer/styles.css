@@ -342,43 +342,6 @@ nav {
   white-space: nowrap;
 }
 
-.auth-steps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 10px 0 8px;
-  padding: 0;
-  list-style: none;
-}
-
-.auth-steps li {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 4px 8px;
-  background: #ffffff;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.auth-steps li.active {
-  border-color: #fedf89;
-  background: #fffaeb;
-  color: var(--amber);
-}
-
-.auth-steps li.done {
-  border-color: #abefc6;
-  background: #ecfdf3;
-  color: var(--green);
-}
-
-.auth-steps li.failed {
-  border-color: #fecdca;
-  background: #fef3f2;
-  color: var(--red);
-}
-
 .auth-code {
   display: inline-block;
   border: 1px dashed #b8c7dc;
