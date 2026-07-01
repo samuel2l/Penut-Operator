@@ -466,6 +466,22 @@ nav {
   color: var(--amber);
 }
 
+.runtime-repair-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid #fedf89;
+  border-radius: 12px;
+  margin-top: 12px;
+  padding: 13px 15px;
+  background: #fffaeb;
+}
+
+.runtime-repair-actions p {
+  margin: 0;
+}
+
 .field {
   display: grid;
   gap: 8px;

@@ -7,6 +7,7 @@ import os from "node:os";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import electronUpdater from "electron-updater";
 import { createTaskStore } from "../storage/task-store.js";
 import { createSettingsStore } from "../storage/settings-store.js";
 import { createOperatorAuthStore } from "../storage/auth-store.js";
@@ -16,11 +17,13 @@ import { getOperatorEnvironment, shouldUseBackendPlanner } from "../config/envir
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { autoUpdater } = electronUpdater;
 const taskStore = createTaskStore();
 const settingsStore = createSettingsStore();
 const authStore = createOperatorAuthStore();
 const DATA_DIR = path.join(path.resolve(__dirname, "../.."), "data");
 const PENDING_DEVICE_LOGIN_FILE = path.join(DATA_DIR, "pending-device-login.json");
+const STARTUP_SMOKE_TEST = process.env.PENUT_OPERATOR_SMOKE_STARTUP === "1";
 let mainWindow;
 let activeRun;
 let pendingDeviceLogin;
@@ -39,11 +42,25 @@ function createMainWindow() {
     },
   });
 
+  mainWindow.webContents.once("did-fail-load", (_event, _errorCode, errorDescription) => {
+    if (STARTUP_SMOKE_TEST) {
+      console.error(`[smoke] renderer failed to load: ${errorDescription}`);
+      app.exit(1);
+    }
+  });
+  mainWindow.webContents.once("did-finish-load", () => {
+    if (STARTUP_SMOKE_TEST) {
+      console.log("[smoke] electron startup ok");
+      app.quit();
+    }
+  });
+
   void mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
 }
 
 app.whenReady().then(() => {
   createMainWindow();
+  setupAutoUpdates();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
@@ -53,6 +70,21 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+function setupAutoUpdates() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on("error", (error) => {
+    console.log("[update] check_failed", sanitizeLogDetail({ error }));
+  });
+  autoUpdater.on("update-downloaded", () => {
+    console.log("[update] downloaded");
+  });
+  autoUpdater.checkForUpdatesAndNotify().catch((error) => {
+    console.log("[update] check_failed", sanitizeLogDetail({ error }));
+  });
+}
 
 ipcMain.handle("tasks:get", async () => syncTasksFromPenut());
 
@@ -103,6 +135,22 @@ ipcMain.handle("settings:get", async () => {
 ipcMain.handle("settings:update", async (_event, patch) => {
   await settingsStore.updateSettings(patch);
   return settingsPayload();
+});
+
+ipcMain.handle("runtime:repair", async () => {
+  try {
+    await repairRuntime();
+    return {
+      ok: true,
+      settings: await settingsPayload(),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: friendlyRuntimeRepairError(error),
+      settings: await settingsPayload(),
+    };
+  }
 });
 
 ipcMain.handle("auth:start", async () => {
@@ -677,10 +725,10 @@ function mapRemoteEvents(events) {
 
 function runBrowserUseWorker(task, settings, onEvent) {
   return new Promise((resolve, reject) => {
-    const workerPath = path.join(__dirname, "../../python/browser_use_worker.py");
-    const localPythonPath = path.join(__dirname, "../../.venv/bin/python");
-    const pythonPath = existsSync(localPythonPath) ? localPythonPath : "python3";
-    const browserUseTerminalBinary = path.join(os.homedir(), ".local/bin/browser-use-terminal");
+    const paths = getRuntimePaths();
+    const workerPath = paths.workerPath;
+    const pythonPath = paths.pythonPath;
+    const browserUseTerminalBinary = paths.browserUseTerminalBinary;
     const operatorEnvironment = getOperatorEnvironment();
     const session = authStore.readSession();
     const env = {
@@ -781,16 +829,81 @@ async function getRunReadiness(settings) {
   };
 }
 
+async function repairRuntime() {
+  const paths = getRuntimePaths();
+  if (!existsSync(paths.workerPath)) {
+    throw new Error("Operator task runner is missing from this app.");
+  }
+  if (!existsSync(paths.requirementsPath)) {
+    throw new Error("Operator runtime requirements are missing from this app.");
+  }
+
+  await runCommand("python3", ["-m", "venv", paths.venvRoot]);
+  await runCommand(paths.venvPythonPath, [
+    "-m",
+    "pip",
+    "install",
+    "--upgrade",
+    "pip",
+  ]);
+  await runCommand(paths.venvPythonPath, [
+    "-m",
+    "pip",
+    "install",
+    "-r",
+    paths.requirementsPath,
+  ]);
+}
+
+function friendlyRuntimeRepairError(error) {
+  const message = String(error?.message || "");
+  if (/ENOENT|python3/i.test(message)) {
+    return "Python is not available on this computer yet. Install Python 3, then repair the Operator runtime again.";
+  }
+  if (/requirements|task runner/i.test(message)) return message;
+  if (/network|ENOTFOUND|ETIMEDOUT|fetch|Could not find/i.test(message)) {
+    return "Operator could not download the runtime packages. Check your internet connection, then try again.";
+  }
+  return "Operator could not repair the runtime. Try again, or contact support if it keeps happening.";
+}
+
 function getRuntimePaths() {
-  const workerPath = path.join(__dirname, "../../python/browser_use_worker.py");
-  const localPythonPath = path.join(__dirname, "../../.venv/bin/python");
-  const pythonPath = existsSync(localPythonPath) ? localPythonPath : "python3";
+  const projectRoot = path.resolve(__dirname, "../..");
+  const resourcesRoot = app.isPackaged ? process.resourcesPath : projectRoot;
+  const runtimeRoot = app.isPackaged
+    ? path.join(app.getPath("userData"), "runtime")
+    : projectRoot;
+  const bundledRuntimeRoot = path.join(resourcesRoot, "python-runtime");
+  const bundledPythonPath = findRuntimePython(bundledRuntimeRoot);
+  const venvRoot = path.join(runtimeRoot, ".venv");
+  const venvPythonPath = process.platform === "win32"
+    ? path.join(venvRoot, "Scripts", "python.exe")
+    : path.join(venvRoot, "bin", "python");
+  const workerPath = path.join(resourcesRoot, "python", "browser_use_worker.py");
+  const requirementsPath = path.join(resourcesRoot, "python", "requirements.txt");
+  const pythonPath = bundledPythonPath || (existsSync(venvPythonPath) ? venvPythonPath : "python3");
   const browserUseTerminalBinary = path.join(os.homedir(), ".local/bin/browser-use-terminal");
   return {
     workerPath,
     pythonPath,
+    bundledPythonPath,
+    venvRoot,
+    venvPythonPath,
+    requirementsPath,
     browserUseTerminalBinary,
   };
+}
+
+function findRuntimePython(runtimeRoot) {
+  const candidates = [
+    path.join(runtimeRoot, "bin", "python3"),
+    path.join(runtimeRoot, "python", "bin", "python3"),
+    path.join(runtimeRoot, "install", "bin", "python3"),
+    path.join(runtimeRoot, "python", "install", "bin", "python3"),
+    path.join(runtimeRoot, "python.exe"),
+    path.join(runtimeRoot, "python", "python.exe"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) || "";
 }
 
 async function checkPenutConnection(settings) {
@@ -967,7 +1080,7 @@ function checkWorker(workerPath) {
     label: "Task runner",
     ready,
     message: ready ? "Task runner is available." : "Task runner is missing.",
-    action: "Install the task runner before running tasks.",
+    action: "Repair the Operator runtime before running tasks.",
   };
 }
 
@@ -981,7 +1094,7 @@ async function checkBrowserUse(pythonPath) {
     label: "Automation engine",
     ready,
     message: ready ? "Automation engine is ready." : "Automation engine needs setup.",
-    action: "Install the automation engine before running tasks.",
+    action: "Repair the Operator runtime before running tasks.",
   };
 }
 
@@ -991,6 +1104,19 @@ function commandSucceeds(command, args) {
       resolve(!error);
     });
     child.on("error", () => resolve(false));
+  });
+}
+
+function runCommand(command, args) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { timeout: 120000 }, (error, stdout, stderr) => {
+      if (error) {
+        const detail = String(stderr || stdout || error.message || "").trim();
+        reject(new Error(detail || error.message));
+        return;
+      }
+      resolve();
+    });
   });
 }
 

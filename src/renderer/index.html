@@ -136,12 +136,16 @@
                 <p>Operator checks these before it starts a browser task.</p>
               </div>
               <ol id="readinessList" class="readiness-list"></ol>
+              <div id="runtimeRepairActions" class="runtime-repair-actions hidden">
+                <p class="help-text">Runtime setup is incomplete. Repair installs the local browser automation packages Operator needs.</p>
+                <button id="repairRuntimeBtn" class="secondary" type="button">Repair runtime</button>
+              </div>
             </div>
           </article>
         </section>
       </section>
     </main>
 
-    <script src="./renderer.js?v=20260630-card-grid-fix" type="module"></script>
+    <script src="./renderer.js?v=20260701-runtime-release" type="module"></script>
   </body>
 </html>

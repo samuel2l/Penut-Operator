@@ -22,6 +22,8 @@ const chromeProfileSelect = document.querySelector("#chromeProfileSelect");
 const profileHelp = document.querySelector("#profileHelp");
 const saveSettingsBtn = document.querySelector("#saveSettingsBtn");
 const readinessList = document.querySelector("#readinessList");
+const runtimeRepairActions = document.querySelector("#runtimeRepairActions");
+const repairRuntimeBtn = document.querySelector("#repairRuntimeBtn");
 const authHelp = document.querySelector("#authHelp");
 const authCard = document.querySelector(".auth-card");
 const authCode = document.querySelector("#authCode");
@@ -344,6 +346,12 @@ function renderSettings(settingsPayload) {
     : "No Chrome profiles were found on this computer.";
 
   renderAuthState();
+  const runtimeNeedsRepair = currentReadiness.checks.some((check) =>
+    ["pythonWorker", "workerScript", "automationEngine"].includes(check.id) &&
+    !check.ready
+  );
+  runtimeRepairActions.classList.toggle("hidden", !runtimeNeedsRepair);
+  repairRuntimeBtn.disabled = !runtimeNeedsRepair;
 
   readinessList.replaceChildren(
     ...currentReadiness.checks.map((check) => {
@@ -594,6 +602,30 @@ signOutBtn.addEventListener("click", async () => {
   currentPendingAuth = null;
   renderSettings(await window.penutOperator.logoutAuth());
   render(await window.penutOperator.getTask());
+});
+
+repairRuntimeBtn.addEventListener("click", async () => {
+  repairRuntimeBtn.disabled = true;
+  repairRuntimeBtn.textContent = "Repairing...";
+  statusBadge.textContent = "Repairing runtime";
+  statusBadge.className = "badge approved";
+  try {
+    const result = await window.penutOperator.repairRuntime();
+    if (result.settings) renderSettings(result.settings);
+    if (!result.ok) {
+      statusBadge.textContent = userFacingError(result.error, "Operator could not repair the runtime.");
+      statusBadge.className = "badge failed";
+      return;
+    }
+    statusBadge.textContent = "Runtime repaired";
+    statusBadge.className = "badge completed";
+  } catch (error) {
+    statusBadge.textContent = userFacingError(error, "Operator could not repair the runtime.");
+    statusBadge.className = "badge failed";
+  } finally {
+    repairRuntimeBtn.textContent = "Repair runtime";
+    renderSettings(await window.penutOperator.getSettings());
+  }
 });
 
 async function resumePendingSignIn() {
