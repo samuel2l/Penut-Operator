@@ -743,7 +743,11 @@ function runBrowserUseWorker(task, settings, onEvent) {
         ? {
             PENUT_OPERATOR_ACCESS_TOKEN: session.accessToken,
             OPENAI_API_KEY: session.accessToken,
-            OPENAI_BASE_URL: `${operatorEnvironment.apiBaseUrl}/browser/openai/v1`,
+            ...(task.remoteId
+              ? {
+                  OPENAI_BASE_URL: `${operatorEnvironment.apiBaseUrl}/browser/tasks/${task.remoteId}/openai/v1`,
+                }
+              : {}),
           }
         : {}),
     };
