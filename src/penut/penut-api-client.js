@@ -1,9 +1,9 @@
-const DEFAULT_API_URL = "https://api.penut.ai/";
+import { getOperatorEnvironment } from "../config/environment.js";
 
 export function createPenutApiClient(settings = {}, options = {}) {
   const authStore = options.authStore || null;
   let auth = authStore?.readSession() || {};
-  const baseUrl = normalizeApiBaseUrl(process.env.PENUT_API_BASE_URL || DEFAULT_API_URL);
+  const baseUrl = getOperatorEnvironment().apiBaseUrl;
 
   return {
     isConfigured: Boolean(baseUrl && auth.accessToken),
@@ -41,6 +41,7 @@ export function createPenutApiClient(settings = {}, options = {}) {
       authStore?.clearSession();
     },
     readSession: () => request("/identity/session"),
+    readPlannerHealth: () => request("/browser/planner/health"),
     listTasks: () => request("/browser/tasks"),
     readTask: (taskId) => request(`/browser/tasks/${encodeURIComponent(taskId)}`),
     createTask: (input) =>
@@ -161,14 +162,6 @@ async function refreshAuth(baseUrl, currentAuth, authStore) {
   };
   authStore?.saveSession(nextAuth);
   return nextAuth;
-}
-
-function normalizeApiBaseUrl(value) {
-  const raw = String(value || "").trim().replace(/\/+$/, "");
-  if (!raw) return "";
-  if (raw.endsWith("/api")) return raw;
-  if (raw.endsWith("/api/platform")) return raw.replace(/\/platform$/, "");
-  return `${raw}/api`;
 }
 
 function safeJson(text) {

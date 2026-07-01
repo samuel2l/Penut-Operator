@@ -11,6 +11,7 @@ import { createTaskStore } from "../storage/task-store.js";
 import { createSettingsStore } from "../storage/settings-store.js";
 import { createOperatorAuthStore } from "../storage/auth-store.js";
 import { createPenutApiClient } from "../penut/penut-api-client.js";
+import { getOperatorEnvironment, shouldUseBackendPlanner } from "../config/environment.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -680,11 +681,23 @@ function runBrowserUseWorker(task, settings, onEvent) {
     const localPythonPath = path.join(__dirname, "../../.venv/bin/python");
     const pythonPath = existsSync(localPythonPath) ? localPythonPath : "python3";
     const browserUseTerminalBinary = path.join(os.homedir(), ".local/bin/browser-use-terminal");
+    const operatorEnvironment = getOperatorEnvironment();
+    const session = authStore.readSession();
     const env = {
       ...process.env,
       BROWSER_USE_TERMINAL_BINARY: browserUseTerminalBinary,
       BROWSER_USE_CHROME_USER_DATA_DIR: settings.chromeUserDataDir,
       BROWSER_USE_CHROME_PROFILE_DIRECTORY: settings.chromeProfileDirectory,
+      PENUT_OPERATOR_CHANNEL: operatorEnvironment.channel,
+      PENUT_OPERATOR_PLANNER: operatorEnvironment.plannerMode,
+      PENUT_API_BASE_URL: operatorEnvironment.apiBaseUrl,
+      ...(operatorEnvironment.plannerMode === "backend" && session.accessToken
+        ? {
+            PENUT_OPERATOR_ACCESS_TOKEN: session.accessToken,
+            OPENAI_API_KEY: session.accessToken,
+            OPENAI_BASE_URL: `${operatorEnvironment.apiBaseUrl}/browser/openai/v1`,
+          }
+        : {}),
     };
     const child = execFile(
       pythonPath,
@@ -755,7 +768,7 @@ async function getRunReadiness(settings) {
   const checks = [
     await checkPenutConnection(settings),
     checkChromeProfile(settings),
-    checkOpenAiKey(),
+    await checkModelAccess(settings),
     await checkPython(paths.pythonPath),
     checkTerminal(paths.browserUseTerminalBinary),
     checkWorker(paths.workerPath),
@@ -879,7 +892,42 @@ function checkChromeProfile(settings) {
   };
 }
 
-function checkOpenAiKey() {
+async function checkModelAccess(settings) {
+  if (shouldUseBackendPlanner()) {
+    const client = createPenutApiClient(settings, { authStore });
+    if (!client.isConfigured) {
+      return {
+        id: "modelAccess",
+        label: "Model access",
+        ready: false,
+        message: "Sign in to Penut to use hosted model access.",
+        action: "Sign in to Penut in Operator settings.",
+      };
+    }
+    try {
+      const health = await client.readPlannerHealth();
+      return {
+        id: "modelAccess",
+        label: "Model access",
+        ready: Boolean(health.ready),
+        message: health.ready
+          ? "Model access is handled by Penut."
+          : "Penut model access is not configured yet.",
+        action: health.ready
+          ? "No action needed."
+          : "Ask the Penut workspace admin to configure Operator model access.",
+      };
+    } catch (error) {
+      return {
+        id: "modelAccess",
+        label: "Model access",
+        ready: false,
+        message: friendlyPenutConnectionError(error),
+        action: friendlyPenutConnectionAction(error),
+      };
+    }
+  }
+
   const ready = Boolean(process.env.OPENAI_API_KEY);
   return {
     id: "modelAccess",

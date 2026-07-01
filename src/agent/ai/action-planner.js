@@ -1,5 +1,6 @@
 import { BrowserActionDescriptions, BrowserActions } from "../browser-actions.js";
-import { OpenAIClient } from "./openai-client.js";
+import { shouldUseBackendPlanner } from "../../config/environment.js";
+import { OpenAIClient, PenutPlannerClient } from "./openai-client.js";
 
 const ACTION_SCHEMA = {
   type: "object",
@@ -54,7 +55,7 @@ const ACTION_SCHEMA = {
 export class AIActionPlanner {
   #client;
 
-  constructor({ client = new OpenAIClient() } = {}) {
+  constructor({ client = createDefaultPlannerClient() } = {}) {
     this.#client = client;
   }
 
@@ -63,6 +64,8 @@ export class AIActionPlanner {
       instructions: buildInstructions(),
       input: JSON.stringify({
         task: {
+          id: task.id || "",
+          remoteId: task.remoteId || "",
           prompt: task.prompt,
           intent: taskContext?.intent || null,
         },
@@ -72,6 +75,10 @@ export class AIActionPlanner {
       schema: ACTION_SCHEMA,
     });
   }
+}
+
+function createDefaultPlannerClient() {
+  return shouldUseBackendPlanner() ? new PenutPlannerClient() : new OpenAIClient();
 }
 
 function buildInstructions() {
