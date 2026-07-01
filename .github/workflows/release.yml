@@ -46,8 +46,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run check
-      - run: npm run agent:dry-run
+      - run: npm run verify
       - run: npm run build:runtime
       - run: echo "PENUT_PYTHON_RUNTIME_ARCHIVE_FILE=$(find build/runtime-archives -type f | head -n 1)" >> "$GITHUB_ENV"
       - run: npm run prepare:runtime
@@ -74,8 +73,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run check
-      - run: npm run agent:dry-run
+      - run: npm run verify
       - run: npm run build:runtime
       - shell: pwsh
         run: |

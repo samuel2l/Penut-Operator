@@ -49,11 +49,14 @@ Python browser-use worker for local development:
 pip install -r python/requirements.txt
 ```
 
-For a non-UI smoke test:
+For the full local verification gate:
 
 ```bash
-npm run agent:dry-run
+npm run verify
 ```
+
+`verify` runs syntax checks, launches Electron in startup smoke-test mode, and
+then runs the non-UI agent dry-run. Use it before packaging or release work.
 
 ## Chrome Setup For Real Browser Control
 
@@ -71,13 +74,7 @@ Then start Operator:
 npm run dev
 ```
 
-When macOS asks for automation permissions, approve them for Penut Operator/Electron. If Chrome cannot be controlled, Operator marks the task failed and writes the setup instructions into the execution log. Dry-run mode is only used by the CLI smoke test.
-
-For syntax checks:
-
-```bash
-npm run check
-```
+When macOS asks for automation permissions, approve them for Penut Operator/Electron. If Chrome cannot be controlled, Operator marks the task failed and writes the setup instructions into the execution log. Dry-run mode is only used by the agent dry-run test.
 
 ## Release Builds
 
