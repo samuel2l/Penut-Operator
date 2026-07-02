@@ -48,7 +48,12 @@
     "extraResources": [
       {
         "from": "python",
-        "to": "python"
+        "to": "python",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
       },
       {
         "from": "build/python-runtime",

@@ -31,6 +31,7 @@ async def run_task(task_prompt):
         llm=ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini")),
         browser_profile=BrowserProfile(
             headless=False,
+            keep_alive=True,
             user_data_dir=os.getenv("BROWSER_USE_CHROME_USER_DATA_DIR"),
             profile_directory=os.getenv("BROWSER_USE_CHROME_PROFILE_DIRECTORY", "Default"),
         ),
