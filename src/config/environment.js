@@ -1,7 +1,7 @@
 const API_BASE_URLS = Object.freeze({
   local: "http://localhost:3000/",
-  dev: "https://dev.api.penut.ai/",
-  prod: "https://api.penut.ai/",
+  dev: "https://dev.penut.ai/",
+  prod: "https://penut.ai/",
 });
 
 export function getOperatorEnvironment() {

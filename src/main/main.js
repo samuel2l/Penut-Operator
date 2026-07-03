@@ -21,8 +21,7 @@ const { autoUpdater } = electronUpdater;
 const taskStore = createTaskStore();
 const settingsStore = createSettingsStore();
 const authStore = createOperatorAuthStore();
-const DATA_DIR = path.join(path.resolve(__dirname, "../.."), "data");
-const PENDING_DEVICE_LOGIN_FILE = path.join(DATA_DIR, "pending-device-login.json");
+const PROJECT_DATA_DIR = path.join(path.resolve(__dirname, "../.."), "data");
 const STARTUP_SMOKE_TEST = process.env.PENUT_OPERATOR_SMOKE_STARTUP === "1";
 let mainWindow;
 let activeRun;
@@ -167,6 +166,7 @@ ipcMain.handle("auth:start", async () => {
     logAuth("start_failed", {
       error: friendlyPenutConnectionError(error),
       action: friendlyPenutConnectionAction(error),
+      raw: safeErrorSummary(error),
     });
     return {
       ok: false,
@@ -625,7 +625,7 @@ async function reconcileTerminalLocalTasks(client, remoteTasks) {
 function getPendingDeviceLogin() {
   if (pendingDeviceLogin?.deviceCode) return pendingDeviceLogin;
   try {
-    const raw = JSON.parse(readFileSync(PENDING_DEVICE_LOGIN_FILE, "utf8"));
+    const raw = JSON.parse(readFileSync(pendingDeviceLoginFile(), "utf8"));
     if (!raw?.deviceCode || !raw?.expiresAt) return null;
     pendingDeviceLogin = {
       deviceCode: String(raw.deviceCode),
@@ -641,8 +641,8 @@ function getPendingDeviceLogin() {
 }
 
 function savePendingDeviceLogin(login) {
-  mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(PENDING_DEVICE_LOGIN_FILE, `${JSON.stringify(login, null, 2)}\n`, {
+  mkdirSync(operatorDataDir(), { recursive: true });
+  writeFileSync(pendingDeviceLoginFile(), `${JSON.stringify(login, null, 2)}\n`, {
     mode: 0o600,
   });
 }
@@ -650,10 +650,20 @@ function savePendingDeviceLogin(login) {
 function clearPendingDeviceLogin() {
   pendingDeviceLogin = null;
   try {
-    unlinkSync(PENDING_DEVICE_LOGIN_FILE);
+    unlinkSync(pendingDeviceLoginFile());
   } catch {
     // Nothing to clear.
   }
+}
+
+function operatorDataDir() {
+  return app.isPackaged
+    ? path.join(app.getPath("userData"), "data")
+    : PROJECT_DATA_DIR;
+}
+
+function pendingDeviceLoginFile() {
+  return path.join(operatorDataDir(), "pending-device-login.json");
 }
 
 function logAuth(event, detail = {}) {
@@ -693,6 +703,8 @@ function safeErrorSummary(error) {
     message: error?.message || "",
     error: body.error || null,
     errorDescription: body.error_description || null,
+    code: body.code || null,
+    suggestion: body.suggestion || null,
   };
 }
 

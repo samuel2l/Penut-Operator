@@ -4,11 +4,12 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const { app } = require("electron");
 const ROOT = path.resolve(__dirname, "../..");
-const DATA_DIR = path.join(ROOT, "data");
-const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
 const CHROME_USER_DATA_DIR = path.join(
   os.homedir(),
   "Library/Application Support/Google/Chrome",
@@ -27,7 +28,7 @@ export function createSettingsStore() {
 async function getSettings() {
   if (cachedSettings) return cachedSettings;
   try {
-    cachedSettings = normalizeSettings(JSON.parse(await readFile(SETTINGS_FILE, "utf8")));
+    cachedSettings = normalizeSettings(JSON.parse(await readFile(settingsFilePath(), "utf8")));
     return cachedSettings;
   } catch {
     cachedSettings = normalizeSettings({});
@@ -117,16 +118,27 @@ function readableProfileName(directory) {
 }
 
 async function writeSettings(settings) {
-  await mkdir(DATA_DIR, { recursive: true });
-  const tempFile = `${SETTINGS_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  const settingsFile = settingsFilePath();
+  await mkdir(dataDir(), { recursive: true });
+  const tempFile = `${settingsFile}.${process.pid}.${crypto.randomUUID()}.tmp`;
   cachedSettings = settings;
   await writeFile(tempFile, `${JSON.stringify(settings, null, 2)}\n`);
   try {
-    await rename(tempFile, SETTINGS_FILE);
+    await rename(tempFile, settingsFile);
   } catch (error) {
     await unlink(tempFile).catch(() => {});
     throw error;
   }
+}
+
+function dataDir() {
+  return app?.isPackaged
+    ? path.join(app.getPath("userData"), "data")
+    : path.join(ROOT, "data");
+}
+
+function settingsFilePath() {
+  return path.join(dataDir(), "settings.json");
 }
 
 function enqueueWrite(operation) {

@@ -5,10 +5,8 @@ import { createRequire } from "node:module";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const { safeStorage } = require("electron");
+const { app, safeStorage } = require("electron");
 const ROOT = path.resolve(__dirname, "../..");
-const DATA_DIR = path.join(ROOT, "data");
-const SESSION_FILE = path.join(DATA_DIR, "operator-session.json");
 
 export function createOperatorAuthStore() {
   return {
@@ -19,7 +17,7 @@ export function createOperatorAuthStore() {
 }
 
 function readSession() {
-  const payload = readJson(SESSION_FILE);
+  const payload = readJson(sessionFilePath());
   if (!payload) return null;
   if (payload.mode === "safeStorage" && typeof payload.data === "string") {
     if (!safeStorage.isEncryptionAvailable()) return null;
@@ -37,7 +35,7 @@ function readSession() {
 }
 
 function saveSession(session) {
-  mkdirSync(DATA_DIR, { recursive: true });
+  mkdirSync(dataDir(), { recursive: true });
   const normalized = normalizeSession(session);
   if (!normalized) return;
   if (!safeStorage.isEncryptionAvailable()) {
@@ -49,18 +47,29 @@ function saveSession(session) {
       .encryptString(JSON.stringify(normalized))
       .toString("base64"),
   };
-  writeFileSync(SESSION_FILE, `${JSON.stringify(payload, null, 2)}\n`, {
+  writeFileSync(sessionFilePath(), `${JSON.stringify(payload, null, 2)}\n`, {
     mode: 0o600,
   });
 }
 
 function clearSession() {
-  if (!existsSync(SESSION_FILE)) return;
+  const sessionFile = sessionFilePath();
+  if (!existsSync(sessionFile)) return;
   try {
-    unlinkSync(SESSION_FILE);
+    unlinkSync(sessionFile);
   } catch {
     // A stale local auth file should not block sign-out UX.
   }
+}
+
+function dataDir() {
+  return app?.isPackaged
+    ? path.join(app.getPath("userData"), "data")
+    : path.join(ROOT, "data");
+}
+
+function sessionFilePath() {
+  return path.join(dataDir(), "operator-session.json");
 }
 
 function normalizeSession(session) {

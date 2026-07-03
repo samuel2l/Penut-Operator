@@ -131,9 +131,40 @@ function render(state) {
   const task = selectedTask(state);
   const isSettings = currentScreen === "settings";
   const isDetail = currentScreen === "detail";
+  const signedIn = isPenutSignedIn();
   settingsScreen.classList.toggle("hidden", !isSettings);
   listScreen.classList.toggle("hidden", isDetail || isSettings);
   detailScreen.classList.toggle("hidden", !isDetail || isSettings);
+
+  if (!isSettings && !signedIn) {
+    const syncState = describeSyncState(state);
+    taskDetails.classList.add("hidden");
+    emptyState.classList.toggle("hidden", !isDetail);
+    listEmptyState.classList.toggle("hidden", isDetail);
+    const emptyTitle = emptyState.querySelector("h2");
+    const emptyMessage = emptyState.querySelector("p");
+    const listEmptyTitle = listEmptyState.querySelector("h3");
+    const listEmptyMessage = listEmptyState.querySelector("p");
+    if (emptyTitle) emptyTitle.textContent = syncState.title;
+    if (emptyMessage) emptyMessage.textContent = syncState.message;
+    if (listEmptyTitle) listEmptyTitle.textContent = syncState.title;
+    if (listEmptyMessage) listEmptyMessage.textContent = syncState.message;
+    statusBadge.textContent = syncState.badge;
+    statusBadge.className = syncState.badgeClass;
+    emptyActionBtn.textContent = syncState.actionLabel || "";
+    emptyActionBtn.classList.toggle("hidden", !syncState.action);
+    emptyActionBtn.dataset.action = syncState.action || "";
+    listEmptyActionBtn.textContent = syncState.actionLabel || "";
+    listEmptyActionBtn.classList.toggle("hidden", !syncState.action);
+    listEmptyActionBtn.dataset.action = syncState.action || "";
+    taskList.replaceChildren();
+    selectedRunTaskIds.clear();
+    runSelectedBtn.disabled = true;
+    newTaskBtn.disabled = true;
+    refreshTasksBtn.disabled = refreshInProgress;
+    selectionHelp.textContent = "Sign in to Penut before loading or creating browser tasks.";
+    return;
+  }
 
   if (!task) {
     taskDetails.classList.add("hidden");
@@ -287,6 +318,18 @@ function render(state) {
 }
 
 function describeSyncState(state) {
+  if (!isPenutSignedIn()) {
+    const authMessage = currentReadiness.checks.find((check) => check.id === "penutConnection")?.message;
+    return {
+      title: "Sign in to Penut",
+      message: authMessage || "Sign in to load browser tasks assigned to your Penut account and create new tasks from Operator.",
+      badge: "Sign in needed",
+      badgeClass: "badge approved",
+      action: "sign_in",
+      actionLabel: "Sign in to Penut",
+    };
+  }
+
   if (!state?.syncError) {
     return {
       title: "No approvals",
@@ -317,6 +360,10 @@ function describeSyncState(state) {
     action: "refresh",
     actionLabel: "Try again",
   };
+}
+
+function isPenutSignedIn() {
+  return Boolean(currentReadiness.checks.find((check) => check.id === "penutConnection")?.ready);
 }
 
 function renderSettings(settingsPayload) {

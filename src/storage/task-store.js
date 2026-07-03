@@ -1,11 +1,12 @@
 import { readFile, writeFile, mkdir, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const { app } = require("electron");
 const ROOT = path.resolve(__dirname, "../..");
-const DATA_DIR = path.join(ROOT, "data");
-const TASK_FILE = path.join(DATA_DIR, "active-task.json");
 const MAX_EVENTS = 100;
 const MAX_TASKS = 50;
 let cachedState;
@@ -191,7 +192,7 @@ async function readState() {
 }
 
 async function readTaskFile() {
-  const raw = await readFile(TASK_FILE, "utf8");
+  const raw = await readFile(taskFilePath(), "utf8");
   return JSON.parse(raw);
 }
 
@@ -311,17 +312,28 @@ function emptyState() {
 }
 
 async function writeState(state) {
-  await mkdir(DATA_DIR, { recursive: true });
+  const taskFile = taskFilePath();
+  await mkdir(dataDir(), { recursive: true });
   const normalized = normalizeState(state);
-  const tempFile = `${TASK_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  const tempFile = `${taskFile}.${process.pid}.${crypto.randomUUID()}.tmp`;
   cachedState = normalized;
   await writeFile(tempFile, `${JSON.stringify(normalized, null, 2)}\n`);
   try {
-    await rename(tempFile, TASK_FILE);
+    await rename(tempFile, taskFile);
   } catch (error) {
     await unlink(tempFile).catch(() => {});
     throw error;
   }
+}
+
+function dataDir() {
+  return app?.isPackaged
+    ? path.join(app.getPath("userData"), "data")
+    : path.join(ROOT, "data");
+}
+
+function taskFilePath() {
+  return path.join(dataDir(), "active-task.json");
 }
 
 function enqueueTaskWrite(operation) {

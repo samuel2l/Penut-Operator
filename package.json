@@ -68,6 +68,7 @@
     },
     "mac": {
       "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
       "target": [
         "dmg",
         "zip"
@@ -82,6 +83,7 @@
       "sign": false
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis"
       ]
