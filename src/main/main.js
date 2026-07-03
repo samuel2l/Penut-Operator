@@ -1,5 +1,5 @@
 import path from "node:path";
-import "dotenv/config";
+import dotenv from "dotenv";
 import crypto from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
@@ -12,7 +12,11 @@ import { createTaskStore } from "../storage/task-store.js";
 import { createSettingsStore } from "../storage/settings-store.js";
 import { createOperatorAuthStore } from "../storage/auth-store.js";
 import { createPenutApiClient } from "../penut/penut-api-client.js";
-import { getOperatorEnvironment, shouldUseBackendPlanner } from "../config/environment.js";
+import { getOperatorEnvironment, shouldLoadDotenv, shouldUseBackendPlanner } from "../config/environment.js";
+
+if (shouldLoadDotenv()) {
+  dotenv.config();
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -58,6 +62,14 @@ function createMainWindow() {
 }
 
 app.whenReady().then(() => {
+  const operatorEnvironment = getOperatorEnvironment();
+  console.log("[operator] runtime", sanitizeLogDetail({
+    channel: operatorEnvironment.channel,
+    planner: operatorEnvironment.plannerMode,
+    apiBaseUrl: operatorEnvironment.apiBaseUrl,
+    simulatePackaged: operatorEnvironment.simulatePackaged,
+    dotenvLoaded: shouldLoadDotenv(),
+  }));
   createMainWindow();
   setupAutoUpdates();
 
@@ -735,38 +747,82 @@ function mapRemoteEvents(events) {
   })).reverse();
 }
 
+function workerScratchDir() {
+  const workerDir = path.join(app.getPath("userData"), "worker");
+  mkdirSync(workerDir, { recursive: true });
+  return workerDir;
+}
+
+function buildWorkerEnv(task, settings, operatorEnvironment, session) {
+  const workerCwd = workerScratchDir();
+  const shared = {
+    PATH: process.env.PATH || "",
+    HOME: process.env.HOME || os.homedir(),
+    USER: process.env.USER || "",
+    TMPDIR: process.env.TMPDIR || os.tmpdir(),
+    LANG: process.env.LANG || "",
+    ...(process.platform === "win32"
+      ? {
+          SystemRoot: process.env.SystemRoot || "",
+          PATHEXT: process.env.PATHEXT || "",
+          USERPROFILE: process.env.USERPROFILE || "",
+        }
+      : {}),
+    PENUT_OPERATOR_WORKER_CWD: workerCwd,
+    BROWSER_USE_CHROME_USER_DATA_DIR: settings.chromeUserDataDir,
+    BROWSER_USE_CHROME_PROFILE_DIRECTORY: settings.chromeProfileDirectory,
+    PENUT_OPERATOR_CHANNEL: operatorEnvironment.channel,
+    PENUT_OPERATOR_PLANNER: operatorEnvironment.plannerMode,
+    PENUT_API_BASE_URL: operatorEnvironment.apiBaseUrl,
+  };
+
+  if (shouldUseBackendPlanner() && session.accessToken) {
+    return {
+      ...shared,
+      PENUT_OPERATOR_ACCESS_TOKEN: session.accessToken,
+      OPENAI_API_KEY: session.accessToken,
+      ...(task.remoteId
+        ? {
+            OPENAI_BASE_URL: `${operatorEnvironment.apiBaseUrl}/browser/tasks/${task.remoteId}/openai/v1`,
+          }
+        : {}),
+    };
+  }
+
+  return {
+    ...process.env,
+    ...shared,
+  };
+}
+
+function looksLikeFalseFileListing(message) {
+  return String(message || "").trim().startsWith("Result files:");
+}
+
 function runBrowserUseWorker(task, settings, onEvent) {
   return new Promise((resolve, reject) => {
     const paths = getRuntimePaths();
     const workerPath = paths.workerPath;
     const pythonPath = paths.pythonPath;
-    const browserUseTerminalBinary = paths.browserUseTerminalBinary;
     const operatorEnvironment = getOperatorEnvironment();
     const session = authStore.readSession();
-    const env = {
-      ...process.env,
-      BROWSER_USE_TERMINAL_BINARY: browserUseTerminalBinary,
-      BROWSER_USE_CHROME_USER_DATA_DIR: settings.chromeUserDataDir,
-      BROWSER_USE_CHROME_PROFILE_DIRECTORY: settings.chromeProfileDirectory,
-      PENUT_OPERATOR_CHANNEL: operatorEnvironment.channel,
-      PENUT_OPERATOR_PLANNER: operatorEnvironment.plannerMode,
-      PENUT_API_BASE_URL: operatorEnvironment.apiBaseUrl,
-      ...(operatorEnvironment.plannerMode === "backend" && session.accessToken
-        ? {
-            PENUT_OPERATOR_ACCESS_TOKEN: session.accessToken,
-            OPENAI_API_KEY: session.accessToken,
-            ...(task.remoteId
-              ? {
-                  OPENAI_BASE_URL: `${operatorEnvironment.apiBaseUrl}/browser/tasks/${task.remoteId}/openai/v1`,
-                }
-              : {}),
-          }
-        : {}),
-    };
+    const env = buildWorkerEnv(task, settings, operatorEnvironment, session);
+    const workerCwd = env.PENUT_OPERATOR_WORKER_CWD;
+    console.log("[worker] launch", sanitizeLogDetail({
+      pythonPath,
+      workerPath,
+      workerCwd,
+      channel: operatorEnvironment.channel,
+      planner: operatorEnvironment.plannerMode,
+      remoteId: task.remoteId || null,
+      hasOpenAiBaseUrl: Boolean(env.OPENAI_BASE_URL),
+      simulatePackaged: operatorEnvironment.simulatePackaged,
+    }));
     const child = execFile(
       pythonPath,
       [workerPath, task.prompt || ""],
       {
+        cwd: workerCwd,
         env,
       },
     );
@@ -815,7 +871,9 @@ function runBrowserUseWorker(task, settings, onEvent) {
       }
 
       resolve({
-        ok: lastEvent?.type === "complete" || code === 0,
+        ok: lastEvent?.type === "complete" &&
+          !looksLikeFalseFileListing(lastEvent?.message) &&
+          code === 0,
         result: lastEvent?.message || "Task finished.",
       });
     });
@@ -834,7 +892,6 @@ async function getRunReadiness(settings) {
     checkChromeProfile(settings),
     await checkModelAccess(settings),
     await checkPython(paths.pythonPath),
-    checkTerminal(paths.browserUseTerminalBinary),
     checkWorker(paths.workerPath),
     await checkBrowserUse(paths.pythonPath),
   ];
@@ -898,7 +955,6 @@ function getRuntimePaths() {
   const workerPath = path.join(resourcesRoot, "python", "browser_use_worker.py");
   const requirementsPath = path.join(resourcesRoot, "python", "requirements.txt");
   const pythonPath = bundledPythonPath || (existsSync(venvPythonPath) ? venvPythonPath : "python3");
-  const browserUseTerminalBinary = path.join(os.homedir(), ".local/bin/browser-use-terminal");
   return {
     workerPath,
     pythonPath,
@@ -906,7 +962,6 @@ function getRuntimePaths() {
     venvRoot,
     venvPythonPath,
     requirementsPath,
-    browserUseTerminalBinary,
   };
 }
 
@@ -1078,17 +1133,6 @@ async function checkPython(pythonPath) {
   };
 }
 
-function checkTerminal(browserUseTerminalBinary) {
-  const ready = existsSync(browserUseTerminalBinary);
-  return {
-    id: "automationTerminal",
-    label: "Browser control",
-    ready,
-    message: ready ? "Browser control is installed." : "Browser control needs setup.",
-    action: "Install browser control before running tasks.",
-  };
-}
-
 function checkWorker(workerPath) {
   const ready = existsSync(workerPath);
   return {
@@ -1139,10 +1183,26 @@ function runCommand(command, args) {
 function formatWorkerLog(line, source) {
   const normalized = String(line || "").replace(/\s+/g, " ").trim();
   if (!normalized) return "";
+  if (/^<!doctype html|^<html|<\/html>|<\/body>|<\/head>|<\/pre>|<body>|<head>|^<meta|^<title>/i.test(normalized)) {
+    return "";
+  }
+  if (/payload too large|request entity too large/i.test(normalized)) {
+    return "Penut rejected the planning request because it was too large.";
+  }
+  if (/^RuntimeError:/i.test(normalized)) return "";
+  if (/^During handling of the above exception/i.test(normalized)) return "";
+  if (/^asyncgen:/i.test(normalized)) return "";
+  if (/^an error occurred during closing of asynchronous generator/i.test(normalized)) return "";
+  if (/^File "/.test(normalized)) return "";
+  if (/^raise RuntimeError/i.test(normalized)) return "";
   if (/^\[Agent\]/.test(normalized)) return friendlyWorkerLine(normalized.replace(/^\[Agent\]\s*/, ""));
-  if (/^\[BrowserSession\]/.test(normalized)) return "Browser is ready.";
+  if (/^\[BrowserSession\]/.test(normalized)) return "";
   if (/^\[service\]/.test(normalized)) return "";
   if (/^INFO\s+\[/.test(normalized)) return "";
+  if (/^WARNING\s+\[/.test(normalized)) return "";
+  if (/^ERROR\s+\[/.test(normalized)) return "";
+  if (/^\[penut-worker\]/i.test(normalized)) return "";
+  if (/^\{"workerCwd":/.test(normalized)) return "";
   if (/^\(node:/.test(normalized)) return "";
   if (/UnhandledPromiseRejectionWarning/i.test(normalized)) return "";
   if (/Traceback/i.test(normalized)) return "";
@@ -1159,6 +1219,9 @@ function friendlyWorkerLine(line) {
   if (/browser session initialized/i.test(normalized)) return "Browser is ready.";
   if (/browser-use worker finished/i.test(normalized)) return "Task finished.";
   if (/browser-use worker failed/i.test(normalized)) return "Task could not finish.";
+  if (/result failed/i.test(normalized)) return "";
+  if (/stopping due to/i.test(normalized)) return "";
+  if (/^result files:/i.test(normalized)) return "";
   if (/page opened/i.test(normalized)) return "Opened the page.";
   if (/task started/i.test(normalized)) return "Task started.";
   if (/stopped by you/i.test(normalized)) return "Stopped by you.";

@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "ELECTRON_RUN_AS_NODE= electron .",
     "dev:local": "PENUT_OPERATOR_CHANNEL=local ELECTRON_RUN_AS_NODE= electron .",
+    "dev:simulate-prod": "PENUT_OPERATOR_CHANNEL=prod PENUT_OPERATOR_SIMULATE_PACKAGED=1 ELECTRON_RUN_AS_NODE= electron .",
     "dev:dev": "PENUT_OPERATOR_CHANNEL=dev ELECTRON_RUN_AS_NODE= electron .",
     "dev:prod": "PENUT_OPERATOR_CHANNEL=prod ELECTRON_RUN_AS_NODE= electron .",
     "start": "ELECTRON_RUN_AS_NODE= electron .",

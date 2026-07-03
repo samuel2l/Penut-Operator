@@ -1,13 +1,16 @@
 import asyncio
 import json
 import os
+import re
 import sys
 import time
+from pathlib import Path
 
-try:
-    from browser_use.beta import Agent, BrowserProfile, ChatOpenAI
-except ImportError:  # pragma: no cover
-    from browser_use import Agent, BrowserProfile, ChatOpenAI
+from browser_use import Agent, BrowserProfile, ChatOpenAI
+
+
+class TaskFailure(RuntimeError):
+    """Raised after a user-facing failure event has already been emitted."""
 
 
 def emit(event_type, message, detail=None):
@@ -21,31 +24,130 @@ def emit(event_type, message, detail=None):
     sys.stdout.flush()
 
 
-async def run_task(task_prompt):
-    started_at = time.perf_counter()
-    emit("agent", "Starting task.")
+def prepare_worker_cwd():
+    raw = os.getenv("PENUT_OPERATOR_WORKER_CWD", "").strip()
+    worker_cwd = Path(raw) if raw else Path(os.getenv("TMPDIR", "/tmp")) / "penut-operator-worker"
+    worker_cwd.mkdir(parents=True, exist_ok=True)
+    os.chdir(worker_cwd)
+    return str(worker_cwd)
 
-    browser_started_at = time.perf_counter()
-    agent = Agent(
-        task=task_prompt,
-        llm=ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini")),
-        browser_profile=BrowserProfile(
-            headless=False,
-            keep_alive=True,
-            user_data_dir=os.getenv("BROWSER_USE_CHROME_USER_DATA_DIR"),
-            profile_directory=os.getenv("BROWSER_USE_CHROME_PROFILE_DIRECTORY", "Default"),
-        ),
+
+def uses_penet_proxy():
+    return bool(os.getenv("OPENAI_BASE_URL", "").strip()) or os.getenv(
+        "PENUT_OPERATOR_PLANNER",
+        "",
+    ).strip().lower() == "backend"
+
+
+def build_llm():
+    llm_kwargs = {
+        "model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+    }
+    base_url = os.getenv("OPENAI_BASE_URL", "").strip()
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if base_url:
+        llm_kwargs["base_url"] = base_url
+    if api_key:
+        llm_kwargs["api_key"] = api_key
+    if uses_penet_proxy():
+        llm_kwargs["reasoning_models"] = []
+    return ChatOpenAI(**llm_kwargs)
+
+
+def build_browser_profile():
+    return BrowserProfile(
+        headless=False,
+        keep_alive=True,
+        user_data_dir=os.getenv("BROWSER_USE_CHROME_USER_DATA_DIR"),
+        profile_directory=os.getenv("BROWSER_USE_CHROME_PROFILE_DIRECTORY", "Default"),
     )
-    emit("agent", "Browser ready.", {"ms": elapsed_ms(browser_started_at)})
 
-    run_started_at = time.perf_counter()
-    history = await agent.run()
+
+def build_agent_kwargs(task_prompt):
+    return {
+        "task": task_prompt,
+        "llm": build_llm(),
+        "browser_profile": build_browser_profile(),
+        "directly_open_url": True,
+    }
+
+
+def friendly_error_message(raw):
+    text = re.sub(r"\s+", " ", str(raw or "")).strip()
+    if not text:
+        return "Task could not finish."
+    lowered = text.lower()
+    if "payload too large" in lowered or "request entity too large" in lowered:
+        return "Penut rejected the planning request because it was too large. The Penut server limit needs to match what local OpenAI accepts."
+    if text.startswith("Result files:"):
+        return "The browser agent returned a local file listing instead of completing the task."
+    if "<!doctype html" in lowered or "<html" in lowered:
+        return "Penut could not process the browser planning request."
+    if len(text) > 240:
+        return f"{text[:237]}..."
+    return text
+
+
+def looks_like_false_file_listing(result):
+    text = str(result or "").strip()
+    return text.startswith("Result files:")
+
+
+def task_error_message(history):
     final_result = ""
     if hasattr(history, "final_result"):
         try:
             final_result = history.final_result() or ""
         except Exception:
             final_result = ""
+    if final_result:
+        return friendly_error_message(final_result)
+
+    if hasattr(history, "errors"):
+        try:
+            errors = [
+                friendly_error_message(error)
+                for error in (history.errors() or [])
+                if str(error).strip()
+            ]
+            if errors:
+                return errors[-1]
+        except Exception:
+            pass
+
+    return "Task could not finish."
+
+
+def fail_task(message):
+    friendly = friendly_error_message(message)
+    emit("agent", "Browser-use worker failed.", {"error": friendly})
+    raise TaskFailure(friendly)
+
+
+async def run_task(task_prompt):
+    started_at = time.perf_counter()
+    prepare_worker_cwd()
+    emit("agent", "Starting task.")
+
+    browser_started_at = time.perf_counter()
+    agent = Agent(**build_agent_kwargs(task_prompt))
+    emit("agent", "Opening Chrome.", {"ms": elapsed_ms(browser_started_at)})
+
+    run_started_at = time.perf_counter()
+    history = await agent.run()
+
+    final_result = ""
+    if hasattr(history, "final_result"):
+        try:
+            final_result = history.final_result() or ""
+        except Exception:
+            final_result = ""
+
+    if looks_like_false_file_listing(final_result):
+        fail_task(final_result)
+
+    if hasattr(history, "is_successful") and not history.is_successful():
+        fail_task(task_error_message(history))
 
     emit(
         "agent",
@@ -67,9 +169,13 @@ def main():
     task_prompt = sys.argv[1]
     try:
         asyncio.run(run_task(task_prompt))
-    except Exception as exc:
-        emit("agent", "Browser-use worker failed.", {"error": str(exc)})
+    except TaskFailure as exc:
         sys.stderr.write(str(exc) + "\n")
+        sys.exit(1)
+    except Exception as exc:
+        fail_msg = friendly_error_message(exc)
+        emit("agent", "Browser-use worker failed.", {"error": fail_msg})
+        sys.stderr.write(fail_msg + "\n")
         sys.exit(1)
 
 
