@@ -12,8 +12,9 @@ import { basename, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { pipeline } from "node:stream/promises";
+import { fileURLToPath } from "node:url";
 
-const root = resolve(new URL("..", import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const runtimeRoot = join(root, "build", "runtime-work");
 const archiveDir = join(root, "build", "runtime-archives");
 const requirementsPath = join(root, "python", "requirements.txt");

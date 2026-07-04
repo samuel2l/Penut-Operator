@@ -10,8 +10,9 @@ import {
 import { basename, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const root = resolve(new URL("..", import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const runtimeDir = join(root, "build", "python-runtime");
 const archiveUrl = process.env.PENUT_PYTHON_RUNTIME_ARCHIVE_URL;
 const archiveFile = process.env.PENUT_PYTHON_RUNTIME_ARCHIVE_FILE;
@@ -72,6 +73,14 @@ console.log(`Prepared Operator Python runtime at ${runtimeDir}`);
 
 function extractArchive(archivePath, destination) {
   if (archivePath.endsWith(".zip")) {
+    if (process.platform === "win32") {
+      run("powershell", [
+        "-NoProfile",
+        "-Command",
+        `Expand-Archive -Path '${archivePath}' -DestinationPath '${destination}' -Force`,
+      ]);
+      return;
+    }
     run("ditto", ["-x", "-k", archivePath, destination]);
     return;
   }

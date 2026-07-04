@@ -1,8 +1,9 @@
 import { existsSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const root = resolve(new URL("..", import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const runtimeRoot = join(root, "build", "python-runtime");
 const pythonPath = findPython(runtimeRoot);
 
