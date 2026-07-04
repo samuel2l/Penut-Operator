@@ -904,6 +904,9 @@ async function getRunReadiness(settings) {
 
 async function repairRuntime() {
   const paths = getRuntimePaths();
+  if (app.isPackaged && !paths.bundledPythonPath) {
+    throw new Error("This installer does not include a Windows-compatible Operator runtime. Install a Windows build that was packaged with the Windows runtime.");
+  }
   if (!existsSync(paths.workerPath)) {
     throw new Error("Operator task runner is missing from this app.");
   }
@@ -911,7 +914,7 @@ async function repairRuntime() {
     throw new Error("Operator runtime requirements are missing from this app.");
   }
 
-  await runCommand("python3", ["-m", "venv", paths.venvRoot]);
+  await runCommand(hostPythonCommand(), ["-m", "venv", paths.venvRoot]);
   await runCommand(paths.venvPythonPath, [
     "-m",
     "pip",
@@ -930,6 +933,9 @@ async function repairRuntime() {
 
 function friendlyRuntimeRepairError(error) {
   const message = String(error?.message || "");
+  if (/does not include a Windows-compatible Operator runtime|Windows runtime/i.test(message)) {
+    return "This Windows installer is missing the Windows automation runtime. Download the Windows build again after it has been rebuilt.";
+  }
   if (/ENOENT|python3/i.test(message)) {
     return "Python is not available on this computer yet. Install Python 3, then repair the Operator runtime again.";
   }
@@ -954,7 +960,8 @@ function getRuntimePaths() {
     : path.join(venvRoot, "bin", "python");
   const workerPath = path.join(resourcesRoot, "python", "browser_use_worker.py");
   const requirementsPath = path.join(resourcesRoot, "python", "requirements.txt");
-  const pythonPath = bundledPythonPath || (existsSync(venvPythonPath) ? venvPythonPath : "python3");
+  const pythonPath = bundledPythonPath ||
+    (existsSync(venvPythonPath) ? venvPythonPath : hostPythonCommand());
   return {
     workerPath,
     pythonPath,
@@ -966,15 +973,24 @@ function getRuntimePaths() {
 }
 
 function findRuntimePython(runtimeRoot) {
-  const candidates = [
-    path.join(runtimeRoot, "bin", "python3"),
-    path.join(runtimeRoot, "python", "bin", "python3"),
-    path.join(runtimeRoot, "install", "bin", "python3"),
-    path.join(runtimeRoot, "python", "install", "bin", "python3"),
-    path.join(runtimeRoot, "python.exe"),
-    path.join(runtimeRoot, "python", "python.exe"),
-  ];
+  const candidates = process.platform === "win32"
+    ? [
+        path.join(runtimeRoot, "python.exe"),
+        path.join(runtimeRoot, "python", "python.exe"),
+        path.join(runtimeRoot, "install", "python.exe"),
+        path.join(runtimeRoot, "python", "install", "python.exe"),
+      ]
+    : [
+        path.join(runtimeRoot, "bin", "python3"),
+        path.join(runtimeRoot, "python", "bin", "python3"),
+        path.join(runtimeRoot, "install", "bin", "python3"),
+        path.join(runtimeRoot, "python", "install", "bin", "python3"),
+      ];
   return candidates.find((candidate) => existsSync(candidate)) || "";
+}
+
+function hostPythonCommand() {
+  return process.platform === "win32" ? "python" : "python3";
 }
 
 async function checkPenutConnection(settings) {
@@ -1124,12 +1140,20 @@ async function checkModelAccess(settings) {
 
 async function checkPython(pythonPath) {
   const ready = await commandSucceeds(pythonPath, ["--version"]);
+  const paths = getRuntimePaths();
+  const missingBundledRuntime = app.isPackaged && !paths.bundledPythonPath;
   return {
     id: "pythonWorker",
     label: "Local worker",
-    ready,
-    message: ready ? "Local worker can start." : "Local worker is not available yet.",
-    action: "Install the local worker before running tasks.",
+    ready: ready && !missingBundledRuntime,
+    message: missingBundledRuntime
+      ? "This build is missing the Windows automation runtime."
+      : ready
+        ? "Local worker can start."
+        : "Local worker is not available yet.",
+    action: missingBundledRuntime
+      ? "Install a Windows build packaged with the Windows runtime."
+      : "Install the local worker before running tasks.",
   };
 }
 

@@ -10,10 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const { app } = require("electron");
 const ROOT = path.resolve(__dirname, "../..");
-const CHROME_USER_DATA_DIR = path.join(
-  os.homedir(),
-  "Library/Application Support/Google/Chrome",
-);
+const CHROME_USER_DATA_DIR = defaultChromeUserDataDir();
 let cachedSettings;
 let writeQueue = Promise.resolve();
 
@@ -110,6 +107,29 @@ function normalizeSettings(settings) {
     chromeProfileName: settings.chromeProfileName || "",
     updatedAt: settings.updatedAt || new Date().toISOString(),
   };
+}
+
+function defaultChromeUserDataDir() {
+  if (process.platform === "win32") {
+    return path.join(
+      process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
+      "Google",
+      "Chrome",
+      "User Data",
+    );
+  }
+
+  if (process.platform === "darwin") {
+    return path.join(
+      os.homedir(),
+      "Library/Application Support/Google/Chrome",
+    );
+  }
+
+  return path.join(
+    process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"),
+    "google-chrome",
+  );
 }
 
 function readableProfileName(directory) {
