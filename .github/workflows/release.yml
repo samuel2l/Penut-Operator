@@ -24,21 +24,16 @@ jobs:
             runner: macos-14
             runtime_url: https://github.com/astral-sh/python-build-standalone/releases/download/20260610/cpython-3.13.14%2B20260610-aarch64-apple-darwin-install_only_stripped.tar.gz
             runtime_sha256: 79daa8e9dea1e64ad50aebb05a807289023a474c2020b72361eb44d67fa2401e
-            dist_script: dist:mac:arm64
+            dist_script: dist:mac:arm64:ci
           - arch: x64
             runner: macos-13
             runtime_url: https://github.com/astral-sh/python-build-standalone/releases/download/20260610/cpython-3.13.14%2B20260610-x86_64-apple-darwin-install_only_stripped.tar.gz
             runtime_sha256: 064731aded38b1a12909088d40d9e0e385dc989e38a1e1de9917610254194962
-            dist_script: dist:mac:x64
+            dist_script: dist:mac:x64:ci
     env:
       PENUT_OPERATOR_CHANNEL: ${{ inputs.channel }}
       PENUT_STANDALONE_PYTHON_ARCHIVE_URL: ${{ matrix.runtime_url }}
       PENUT_STANDALONE_PYTHON_ARCHIVE_SHA256: ${{ matrix.runtime_sha256 }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
-      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -64,8 +59,8 @@ jobs:
       PENUT_OPERATOR_CHANNEL: ${{ inputs.channel }}
       PENUT_STANDALONE_PYTHON_ARCHIVE_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20260610/cpython-3.13.14%2B20260610-x86_64-pc-windows-msvc-install_only_stripped.tar.gz
       PENUT_STANDALONE_PYTHON_ARCHIVE_SHA256: 2933d50847057b9131ff89578a220b9206c40fd6bc34d0c12afb716bd9bf8fc9
-      CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
-      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+      CSC_NAME: "-"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -81,7 +76,7 @@ jobs:
           "PENUT_PYTHON_RUNTIME_ARCHIVE_FILE=$($archive.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
       - run: npm run prepare:runtime
       - run: npm run verify:runtime
-      - run: npm run dist:win:x64
+      - run: npm run dist:win:x64:ci
       - uses: actions/upload-artifact@v4
         with:
           name: penut-operator-windows-x64
