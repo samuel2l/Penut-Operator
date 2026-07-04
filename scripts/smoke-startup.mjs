@@ -8,14 +8,15 @@ const require = createRequire(import.meta.url);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const timeoutMs = 30_000;
 const electronPath = resolveElectronPath();
+const env = {
+  ...process.env,
+  PENUT_OPERATOR_SMOKE_STARTUP: "1",
+};
+delete env.ELECTRON_RUN_AS_NODE;
 
 const child = spawn(electronPath, [root], {
   cwd: root,
-  env: {
-    ...process.env,
-    ELECTRON_RUN_AS_NODE: "",
-    PENUT_OPERATOR_SMOKE_STARTUP: "1",
-  },
+  env,
   stdio: ["ignore", "pipe", "pipe"],
   shell: process.platform === "win32" && electronPath.endsWith(".cmd"),
 });
