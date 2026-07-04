@@ -27,6 +27,7 @@ const settingsStore = createSettingsStore();
 const authStore = createOperatorAuthStore();
 const PROJECT_DATA_DIR = path.join(path.resolve(__dirname, "../.."), "data");
 const STARTUP_SMOKE_TEST = process.env.PENUT_OPERATOR_SMOKE_STARTUP === "1";
+const BROWSER_OPEN_TIMEOUT_MS = 90000;
 let mainWindow;
 let activeRun;
 let pendingDeviceLogin;
@@ -828,6 +829,33 @@ function runBrowserUseWorker(task, settings, onEvent) {
     );
 
     let lastEvent = null;
+    let browserOpenTimer = null;
+    let browserOpenTimedOut = false;
+
+    const clearBrowserOpenTimer = () => {
+      if (!browserOpenTimer) return;
+      clearTimeout(browserOpenTimer);
+      browserOpenTimer = null;
+    };
+
+    const startBrowserOpenTimer = () => {
+      clearBrowserOpenTimer();
+      browserOpenTimer = setTimeout(() => {
+        browserOpenTimedOut = true;
+        const message = browserOpenTimeoutMessage(settings);
+        void onEvent({
+          type: "agent",
+          message,
+          detail: {
+            timeoutMs: BROWSER_OPEN_TIMEOUT_MS,
+            platform: process.platform,
+            chromeUserDataDir: settings.chromeUserDataDir || "",
+            chromeProfileDirectory: settings.chromeProfileDirectory || "",
+          },
+        });
+        child.kill("SIGTERM");
+      }, BROWSER_OPEN_TIMEOUT_MS);
+    };
 
     const handleLine = (line, source) => {
       const trimmed = line.trim();
@@ -836,6 +864,13 @@ function runBrowserUseWorker(task, settings, onEvent) {
       try {
         const event = JSON.parse(trimmed);
         lastEvent = event;
+        if (event.type === "complete") {
+          clearBrowserOpenTimer();
+        } else if (event.message === "Opening Chrome.") {
+          startBrowserOpenTimer();
+        } else if (browserOpenTimer && event.message !== "Opening Chrome.") {
+          clearBrowserOpenTimer();
+        }
         void onEvent(event);
         return;
       } catch {
@@ -856,14 +891,21 @@ function runBrowserUseWorker(task, settings, onEvent) {
     stderrReader.on("line", (line) => handleLine(line, "stderr"));
 
     child.on("error", (error) => {
+      clearBrowserOpenTimer();
       stdoutReader.close();
       stderrReader.close();
       reject(error);
     });
 
     child.on("close", (code) => {
+      clearBrowserOpenTimer();
       stdoutReader.close();
       stderrReader.close();
+
+      if (browserOpenTimedOut) {
+        reject(new Error(browserOpenTimeoutMessage(settings)));
+        return;
+      }
 
       if (code !== 0 && !lastEvent) {
         reject(new Error(`browser-use worker exited with code ${code}.`));
@@ -883,6 +925,17 @@ function runBrowserUseWorker(task, settings, onEvent) {
       activeRun.remoteId = task.remoteId || null;
     }
   });
+}
+
+function browserOpenTimeoutMessage(settings) {
+  const profileName = settings.chromeProfileDirectory || "the selected Chrome profile";
+  if (process.platform === "win32") {
+    return [
+      `Operator could not open Chrome with ${profileName}.`,
+      "Close Chrome completely from Task Manager, then run the task again.",
+    ].join(" ");
+  }
+  return `Operator could not open Chrome with ${profileName}. Close Chrome completely, then run the task again.`;
 }
 
 async function getRunReadiness(settings) {

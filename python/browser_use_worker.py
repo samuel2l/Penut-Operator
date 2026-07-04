@@ -55,6 +55,14 @@ def build_llm():
 
 
 def build_browser_profile():
+    emit(
+        "agent",
+        "Preparing browser session.",
+        {
+            "userDataDir": os.getenv("BROWSER_USE_CHROME_USER_DATA_DIR", ""),
+            "profileDirectory": os.getenv("BROWSER_USE_CHROME_PROFILE_DIRECTORY", "Default"),
+        },
+    )
     return BrowserProfile(
         headless=False,
         keep_alive=True,
@@ -131,9 +139,10 @@ async def run_task(task_prompt):
 
     browser_started_at = time.perf_counter()
     agent = Agent(**build_agent_kwargs(task_prompt))
-    emit("agent", "Opening Chrome.", {"ms": elapsed_ms(browser_started_at)})
+    emit("agent", "Browser worker ready.", {"ms": elapsed_ms(browser_started_at)})
 
     run_started_at = time.perf_counter()
+    emit("agent", "Opening Chrome.")
     history = await agent.run()
 
     final_result = ""
