@@ -846,12 +846,6 @@ function runBrowserUseWorker(task, settings, onEvent) {
         void onEvent({
           type: "agent",
           message,
-          detail: {
-            timeoutMs: BROWSER_OPEN_TIMEOUT_MS,
-            platform: process.platform,
-            chromeUserDataDir: settings.chromeUserDataDir || "",
-            chromeProfileDirectory: settings.chromeProfileDirectory || "",
-          },
         });
         child.kill("SIGTERM");
       }, BROWSER_OPEN_TIMEOUT_MS);

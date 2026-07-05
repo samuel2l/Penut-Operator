@@ -86,6 +86,10 @@ function friendlyEventMessage(event) {
     "Operator run started.": "Task started",
     "Observed browser page.": "Page opened",
     "Operator run stopped by user.": "Stopped by you",
+    "Browser-use worker failed.": "Task could not finish",
+    "Browser worker ready.": "Browser is ready",
+    "Opening Chrome.": "Opening Chrome",
+    "Starting task.": "Starting task",
   };
   return map[event?.message] || event?.message || "Update";
 }
@@ -93,17 +97,24 @@ function friendlyEventMessage(event) {
 function friendlyEventDetail(event) {
   const detail = event?.detail;
   if (!detail || typeof detail !== "object") return "";
-  if (detail.error) return String(detail.error);
-  if (detail.reason) return String(detail.reason);
-  if (typeof detail.ms === "number" && typeof detail.totalMs === "number") {
-    return `Run time: ${Math.round(detail.ms / 1000 * 10) / 10}s, total: ${Math.round(detail.totalMs / 1000 * 10) / 10}s`;
-  }
-  if (typeof detail.ms === "number") return `Took ${Math.round(detail.ms / 1000 * 10) / 10}s`;
-  if (detail.url) return `Page: ${detail.url}`;
-  if (detail.action) return `Action: ${detail.action}`;
-  if (detail.rejectedAction) return `Rejected: ${detail.rejectedAction}`;
-  if (detail.rejectionCount) return `Rejected ${detail.rejectionCount} time(s)`;
+  if (detail.error) return friendlyActivityDetail(detail.error);
+  if (detail.reason) return friendlyActivityDetail(detail.reason);
   return "";
+}
+
+function friendlyActivityDetail(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if (/one or more files are locked|close any chrome windows|chrome profile/i.test(text)) {
+    return "Chrome is already using this profile. Close Chrome completely, then try again.";
+  }
+  if (/payload too large|request entity too large/i.test(text)) {
+    return "The task was too large to process. Try making the request shorter.";
+  }
+  if (/browser-use|worker|traceback|runtimeerror|file \"|python/i.test(text)) {
+    return "Operator could not complete the browser task. Try again, or restart Operator if it keeps happening.";
+  }
+  return text.length > 180 ? `${text.slice(0, 177)}...` : text;
 }
 
 function selectedTask(state) {
