@@ -55,14 +55,7 @@ def build_llm():
 
 
 def build_browser_profile():
-    emit(
-        "agent",
-        "Preparing browser session.",
-        {
-            "userDataDir": os.getenv("BROWSER_USE_CHROME_USER_DATA_DIR", ""),
-            "profileDirectory": os.getenv("BROWSER_USE_CHROME_PROFILE_DIRECTORY", "Default"),
-        },
-    )
+    emit("agent", "Preparing browser session.")
     return BrowserProfile(
         headless=False,
         keep_alive=True,
@@ -128,7 +121,7 @@ def task_error_message(history):
 
 def fail_task(message):
     friendly = friendly_error_message(message)
-    emit("agent", "Browser-use worker failed.", {"error": friendly})
+    emit("agent", "Task could not finish.", {"reason": friendly})
     raise TaskFailure(friendly)
 
 
@@ -139,7 +132,7 @@ async def run_task(task_prompt):
 
     browser_started_at = time.perf_counter()
     agent = Agent(**build_agent_kwargs(task_prompt))
-    emit("agent", "Browser worker ready.", {"ms": elapsed_ms(browser_started_at)})
+    emit("agent", "Browser is ready.")
 
     run_started_at = time.perf_counter()
     emit("agent", "Opening Chrome.")
@@ -172,7 +165,7 @@ async def run_task(task_prompt):
 
 def main():
     if len(sys.argv) < 2:
-        emit("agent", "Missing task prompt for browser-use worker.")
+        emit("agent", "Task is missing instructions.")
         sys.exit(1)
 
     task_prompt = sys.argv[1]
@@ -183,7 +176,7 @@ def main():
         sys.exit(1)
     except Exception as exc:
         fail_msg = friendly_error_message(exc)
-        emit("agent", "Browser-use worker failed.", {"error": fail_msg})
+        emit("agent", "Task could not finish.", {"reason": fail_msg})
         sys.stderr.write(fail_msg + "\n")
         sys.exit(1)
 

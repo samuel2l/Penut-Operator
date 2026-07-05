@@ -153,9 +153,11 @@ function render(state) {
     statusBadge.className = syncState.badgeClass;
     emptyActionBtn.textContent = syncState.actionLabel || "";
     emptyActionBtn.classList.toggle("hidden", !syncState.action);
+    emptyActionBtn.disabled = !syncState.action;
     emptyActionBtn.dataset.action = syncState.action || "";
     listEmptyActionBtn.textContent = syncState.actionLabel || "";
     listEmptyActionBtn.classList.toggle("hidden", !syncState.action);
+    listEmptyActionBtn.disabled = !syncState.action;
     listEmptyActionBtn.dataset.action = syncState.action || "";
     taskList.replaceChildren();
     selectedRunTaskIds.clear();
@@ -185,9 +187,11 @@ function render(state) {
     statusBadge.className = syncState.badgeClass;
     emptyActionBtn.textContent = syncState.actionLabel || "";
     emptyActionBtn.classList.toggle("hidden", !syncState.action);
+    emptyActionBtn.disabled = !syncState.action;
     emptyActionBtn.dataset.action = syncState.action || "";
     listEmptyActionBtn.textContent = syncState.actionLabel || "";
     listEmptyActionBtn.classList.toggle("hidden", !syncState.action);
+    listEmptyActionBtn.disabled = !syncState.action;
     listEmptyActionBtn.dataset.action = syncState.action || "";
     taskList.replaceChildren();
     return;
@@ -635,12 +639,17 @@ async function handleEmptyAction(action) {
     setScreen("settings");
     renderSettings(await window.penutOperator.getSettings());
     render(currentState);
+    await nextPaint();
     await startSignIn();
     return;
   }
   if (action === "refresh") {
     await refreshTasks();
   }
+}
+
+function nextPaint() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
 signOutBtn.addEventListener("click", async () => {
