@@ -18,8 +18,6 @@ export function createTaskStore() {
     getActiveTask,
     selectTask,
     createTask,
-    mergeRemoteTasks,
-    setSyncError,
     updateTask,
     updateActiveTask,
     appendEvent,
@@ -65,7 +63,6 @@ async function createTask(prompt = "") {
       id: `task_${crypto.randomUUID()}`,
       status: "pending",
       requestedBy: "You",
-      accountOwner: "Assigned to you",
       prompt: String(prompt || "").trim(),
       createdAt: now,
       updatedAt: now,
@@ -80,54 +77,7 @@ async function createTask(prompt = "") {
     const next = {
       ...state,
       selectedTaskId: task.id,
-      syncError: null,
-      syncErrorReason: null,
       tasks: [task, ...state.tasks].slice(0, MAX_TASKS),
-      updatedAt: now,
-    };
-    await writeState(next);
-    return next;
-  });
-}
-
-async function mergeRemoteTasks(remoteTasks = []) {
-  return enqueueTaskWrite(async () => {
-    const state = await readState();
-    const now = new Date().toISOString();
-    const remote = remoteTasks.map((remoteTask) => {
-      const existing = findExistingRemoteTask(state.tasks, remoteTask.id);
-      return normalizeRemoteTask(remoteTask, existing);
-    });
-    const selectedTaskId = remote.some((task) => task.id === state.selectedTaskId)
-      ? state.selectedTaskId
-      : remote[0]?.id || null;
-    const next = {
-      ...state,
-      selectedTaskId,
-      syncError: null,
-      syncErrorReason: null,
-      tasks: remote.slice(0, MAX_TASKS),
-      updatedAt: now,
-    };
-    await writeState(next);
-    return next;
-  });
-}
-
-function findExistingRemoteTask(tasks, remoteId) {
-  return tasks.find((task) => task.remoteId === remoteId || task.id === `remote_${remoteId}`);
-}
-
-async function setSyncError(message, reason = "sync_error") {
-  return enqueueTaskWrite(async () => {
-    const state = await readState();
-    const now = new Date().toISOString();
-    const next = {
-      ...state,
-      selectedTaskId: null,
-      syncError: message,
-      syncErrorReason: reason,
-      tasks: [],
       updatedAt: now,
     };
     await writeState(next);
@@ -205,8 +155,6 @@ function normalizeState(raw) {
     return {
       version: 2,
       selectedTaskId,
-      syncError: raw.syncError || null,
-      syncErrorReason: raw.syncErrorReason || null,
       tasks,
       updatedAt: raw.updatedAt || new Date().toISOString(),
     };
@@ -216,8 +164,6 @@ function normalizeState(raw) {
   return {
     version: 2,
     selectedTaskId: task?.id || null,
-    syncError: null,
-    syncErrorReason: null,
     tasks: task ? [task] : [],
     updatedAt: task?.updatedAt || new Date().toISOString(),
   };
@@ -227,65 +173,13 @@ function normalizeTask(task) {
   const now = new Date().toISOString();
   return {
     id: task.id || `task_${crypto.randomUUID()}`,
-    remoteId: task.remoteId || null,
-    approvalRequestId: task.approvalRequestId || null,
-    approvalActionId: task.approvalActionId || null,
-    pendingTerminalUpdate:
-      task.pendingTerminalUpdate &&
-      typeof task.pendingTerminalUpdate === "object" &&
-      !Array.isArray(task.pendingTerminalUpdate)
-        ? task.pendingTerminalUpdate
-        : null,
     status: task.status || "pending",
     requestedBy: task.requestedBy || "You",
-    accountOwner: task.accountOwner || "Assigned to you",
     prompt: task.prompt || "",
     createdAt: task.createdAt || now,
     updatedAt: task.updatedAt || task.createdAt || now,
     events: Array.isArray(task.events) ? task.events : [],
   };
-}
-
-function normalizeRemoteTask(task, existingTask) {
-  const now = new Date().toISOString();
-  const remoteStatus = normalizeRemoteStatus(task.status);
-  const status = terminalStatus(existingTask?.status) && ["running", "approved"].includes(remoteStatus)
-    ? existingTask.status
-    : remoteStatus;
-  const prompt = task.editedPrompt || task.prompt || "";
-  return normalizeTask({
-    ...existingTask,
-    id: `remote_${task.id}`,
-    remoteId: task.id,
-    approvalRequestId: task.approvalRequestId || null,
-    approvalActionId: task.approvalActionId || null,
-    status,
-    requestedBy: task.requestedByMemberId ? "You" : "Penut",
-    accountOwner: "Assigned to you",
-    prompt,
-    createdAt: task.createdAt || now,
-    updatedAt: task.updatedAt || task.createdAt || now,
-    events: existingTask?.events || [],
-  });
-}
-
-function terminalStatus(status) {
-  return ["completed", "failed", "stopped", "rejected"].includes(status);
-}
-
-function normalizeRemoteStatus(status) {
-  const map = {
-    pending_approval: "pending",
-    approved: "approved",
-    claimed: "running",
-    running: "running",
-    completed: "completed",
-    failed: "failed",
-    cancelled: "stopped",
-    rejected: "rejected",
-    expired: "failed",
-  };
-  return map[status] || status || "pending";
 }
 
 function getSelectedTask(state) {
@@ -304,8 +198,6 @@ function emptyState() {
   return {
     version: 2,
     selectedTaskId: null,
-    syncError: null,
-    syncErrorReason: null,
     tasks: [],
     updatedAt: new Date().toISOString(),
   };

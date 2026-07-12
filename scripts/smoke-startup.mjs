@@ -10,7 +10,7 @@ const timeoutMs = 30_000;
 const electronPath = resolveElectronPath();
 const env = {
   ...process.env,
-  PENUT_OPERATOR_SMOKE_STARTUP: "1",
+  OPERATOR_SMOKE_STARTUP: "1",
 };
 delete env.ELECTRON_RUN_AS_NODE;
 

@@ -14,8 +14,8 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const runtimeDir = join(root, "build", "python-runtime");
-const archiveUrl = process.env.PENUT_PYTHON_RUNTIME_ARCHIVE_URL;
-const archiveFile = process.env.PENUT_PYTHON_RUNTIME_ARCHIVE_FILE;
+const archiveUrl = process.env.OPERATOR_PYTHON_RUNTIME_ARCHIVE_URL;
+const archiveFile = process.env.OPERATOR_PYTHON_RUNTIME_ARCHIVE_FILE;
 
 if (!archiveUrl && !archiveFile) {
   console.log(
@@ -25,7 +25,7 @@ if (!archiveUrl && !archiveFile) {
   mkdirSync(runtimeDir, { recursive: true });
   writeFileSync(
     join(runtimeDir, "README.txt"),
-    "Set PENUT_PYTHON_RUNTIME_ARCHIVE_URL to prepare a bundled runtime.\n",
+    "Set OPERATOR_PYTHON_RUNTIME_ARCHIVE_URL to prepare a bundled runtime.\n",
   );
   process.exit(0);
 }

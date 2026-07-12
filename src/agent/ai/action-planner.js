@@ -1,6 +1,5 @@
 import { BrowserActionDescriptions, BrowserActions } from "../browser-actions.js";
-import { shouldUseBackendPlanner } from "../../config/environment.js";
-import { OpenAIClient, PenutPlannerClient } from "./openai-client.js";
+import { OpenAIClient } from "./openai-client.js";
 
 const ACTION_SCHEMA = {
   type: "object",
@@ -55,7 +54,7 @@ const ACTION_SCHEMA = {
 export class AIActionPlanner {
   #client;
 
-  constructor({ client = createDefaultPlannerClient() } = {}) {
+  constructor({ client = new OpenAIClient() } = {}) {
     this.#client = client;
   }
 
@@ -65,7 +64,6 @@ export class AIActionPlanner {
       input: JSON.stringify({
         task: {
           id: task.id || "",
-          remoteId: task.remoteId || "",
           prompt: task.prompt,
           intent: taskContext?.intent || null,
         },
@@ -77,13 +75,9 @@ export class AIActionPlanner {
   }
 }
 
-function createDefaultPlannerClient() {
-  return shouldUseBackendPlanner() ? new PenutPlannerClient() : new OpenAIClient();
-}
-
 function buildInstructions() {
   return [
-    "You are Penut Operator, a local browser-control agent.",
+    "You are Browser Operator, a local browser-control agent.",
     "Choose exactly one next browser action as JSON.",
     "Use only the provided observed element ids. Do not invent element ids.",
     "Recent history may include rejected actions. Do not repeat rejected actions; choose a different route.",

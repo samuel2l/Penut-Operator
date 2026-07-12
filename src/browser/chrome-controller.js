@@ -57,7 +57,7 @@ export class ChromeController {
       throw new Error(
         [
           "Could not control normal Chrome.",
-          "In Chrome, enable View > Developer > Allow JavaScript from Apple Events, then approve macOS automation permissions for Penut Operator/Electron.",
+          "In Chrome, enable View > Developer > Allow JavaScript from Apple Events, then approve macOS automation permissions for Browser Operator/Electron.",
           `Original error: ${cleanAppleScriptError(error.message)}`,
         ].join(" "),
       );

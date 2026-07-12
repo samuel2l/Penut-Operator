@@ -3,23 +3,23 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Penut Operator</title>
-    <link rel="stylesheet" href="./styles.css?v=20260702-penut-product-ui" />
+    <title>Browser Operator</title>
+    <link rel="stylesheet" href="./styles.css?v=20260712-local" />
   </head>
   <body>
     <main class="app-shell">
       <aside class="sidebar">
         <div class="brand">
           <div class="mark" aria-hidden="true">
-            <img src="./penut-square.svg" alt="" />
+            <img src="./mark.svg" alt="" />
           </div>
           <div>
-            <strong>Penut Operator</strong>
-            <span>Browser workspace</span>
+            <strong>Browser Operator</strong>
+            <span>Local automation</span>
           </div>
         </div>
         <nav>
-          <button id="approvalsNavBtn" class="nav-item active">Approvals</button>
+          <button id="tasksNavBtn" class="nav-item active">Tasks</button>
           <button id="settingsNavBtn" class="nav-item">Settings</button>
         </nav>
       </aside>
@@ -28,7 +28,7 @@
         <header class="topbar">
           <div>
             <p class="eyebrow">Operator</p>
-            <h1>Review and run</h1>
+            <h1>Create and run</h1>
           </div>
           <span id="statusBadge" class="badge">Loading</span>
         </header>
@@ -38,7 +38,7 @@
             <div class="section-title queue-title">
               <div>
                 <h2>Tasks</h2>
-                <p>Review ready work, choose what to run, and let Operator handle the browser.</p>
+                <p>Create tasks, choose what to run, and watch the browser work.</p>
               </div>
               <div class="queue-actions">
                 <button id="runSelectedBtn" class="primary compact" type="button">Run selected</button>
@@ -49,22 +49,22 @@
             <p id="selectionHelp" class="selection-help">Select ready tasks to run them one after another.</p>
             <ol id="taskList" class="task-list"></ol>
             <div id="listEmptyState" class="list-empty-state">
-              <h3>Sign in to Penut</h3>
-              <p>Sign in to load browser tasks assigned to you and create new tasks from Operator.</p>
-              <button id="listEmptyActionBtn" class="primary" type="button">Sign in to Penut</button>
+              <h3>No tasks yet</h3>
+              <p>Create a task, describe what should happen in the browser, then run it.</p>
+              <button id="listEmptyActionBtn" class="primary" type="button">New task</button>
             </div>
           </article>
         </section>
 
         <section id="detailScreen" class="screen hidden">
-          <button id="backBtn" class="back-button" type="button">Back to approvals</button>
+          <button id="backBtn" class="back-button" type="button">Back to tasks</button>
 
           <section id="taskDetails" class="task-details">
             <article class="panel task-compose">
               <div class="detail-heading">
                 <div class="section-title">
                   <h2>Task details</h2>
-                  <p>Edit and save the request, then return to the list to select tasks or run this one now.</p>
+                  <p>Edit the request, save it, then run this task or return to the list.</p>
                 </div>
               </div>
 
@@ -93,8 +93,8 @@
           <section id="emptyState" class="panel empty-state">
             <div>
               <h2>Select a task</h2>
-              <p>Choose a task from the list to review it, edit it, approve it, or see what happened during the run.</p>
-              <button id="emptyActionBtn" class="primary hidden" type="button">Sign in to Penut</button>
+              <p>Choose a task from the list to review it, edit it, run it, or see what happened during the run.</p>
+              <button id="emptyActionBtn" class="primary hidden" type="button">New task</button>
             </div>
           </section>
         </section>
@@ -103,21 +103,7 @@
           <article class="panel settings-panel">
             <div class="section-title">
               <h2>Operator setup</h2>
-              <p>Sign in to Penut, then choose the Chrome profile Operator should use for browser tasks.</p>
-            </div>
-
-            <div class="auth-card">
-              <div>
-                <strong>Penut account</strong>
-                <p id="authHelp" class="help-text">Sign in to load and run your assigned browser tasks.</p>
-                <p id="authCode" class="auth-code hidden"></p>
-              </div>
-              <div class="auth-actions">
-                <button id="signInBtn" class="primary" type="button">Sign in to Penut</button>
-                <button id="reopenAuthBtn" class="secondary hidden" type="button">Open browser again</button>
-                <button id="cancelAuthBtn" class="secondary hidden" type="button">Cancel sign-in</button>
-                <button id="signOutBtn" class="secondary hidden" type="button">Sign out</button>
-              </div>
+              <p>Choose the Chrome profile Operator should use, and confirm OpenAI and runtime readiness.</p>
             </div>
 
             <label class="field">
@@ -127,6 +113,7 @@
 
             <p id="profileHelp" class="help-text"></p>
             <p class="help-text">Operator uses this Chrome profile so it can work with accounts you are already signed into. It may open or focus Chrome while a task is running.</p>
+            <p class="help-text">Model access comes from <code>OPENAI_API_KEY</code> in your <code>.env</code> file. Restart Operator after changing it.</p>
 
             <div class="actions">
               <button id="saveSettingsBtn" class="primary">Save profile</button>
@@ -148,6 +135,6 @@
       </section>
     </main>
 
-    <script src="./renderer.js?v=20260701-runtime-release" type="module"></script>
+    <script src="./renderer.js?v=20260712-local" type="module"></script>
   </body>
 </html>

@@ -1,8 +1,7 @@
 {
   "id": "task_sample_browser_task_001",
   "status": "pending",
-  "requestedBy": "Penut Agent",
-  "accountOwner": "Account owner",
+  "requestedBy": "You",
   "prompt": "Open the target page, prepare the requested message or action, and pause before the final send step.",
   "createdAt": "2026-06-26T00:00:00.000Z",
   "events": []

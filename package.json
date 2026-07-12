@@ -1,17 +1,13 @@
 {
-  "name": "penut-operator",
+  "name": "browser-operator",
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Local AI browser operator for approved Penut tasks.",
-  "author": "Penut",
+  "description": "Local AI browser automation desktop app.",
+  "author": "Browser Operator",
   "main": "src/main/main.js",
   "scripts": {
     "dev": "ELECTRON_RUN_AS_NODE= electron .",
-    "dev:local": "PENUT_OPERATOR_CHANNEL=local ELECTRON_RUN_AS_NODE= electron .",
-    "dev:simulate-prod": "PENUT_OPERATOR_CHANNEL=prod PENUT_OPERATOR_SIMULATE_PACKAGED=1 ELECTRON_RUN_AS_NODE= electron .",
-    "dev:dev": "PENUT_OPERATOR_CHANNEL=dev ELECTRON_RUN_AS_NODE= electron .",
-    "dev:prod": "PENUT_OPERATOR_CHANNEL=prod ELECTRON_RUN_AS_NODE= electron .",
     "start": "ELECTRON_RUN_AS_NODE= electron .",
     "dist": "CSC_IDENTITY_AUTO_DISCOVERY=false CSC_NAME=- electron-builder",
     "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false CSC_NAME=- electron-builder --mac",
@@ -29,11 +25,10 @@
     "smoke:startup": "node scripts/smoke-startup.mjs",
     "verify": "npm run check && npm run smoke:startup && npm run agent:dry-run",
     "agent:dry-run": "node src/agent/cli.js --dry-run",
-    "check": "node --check src/main/main.js && node --check src/main/preload.cjs && node --check src/renderer/renderer.js && node --check src/config/environment.js && node --check src/penut/penut-api-client.js && node --check src/agent/ai/openai-client.js && node --check src/agent/ai/action-planner.js && node --check src/agent/browser-actions.js && node --check src/agent/cli.js && node --check src/agent/runtime.js && node --check src/browser/chrome-controller.js && node --check src/storage/task-store.js && node --check src/storage/settings-store.js && node --check src/storage/auth-store.js"
+    "check": "node --check src/main/main.js && node --check src/main/preload.cjs && node --check src/renderer/renderer.js && node --check src/config/environment.js && node --check src/agent/ai/openai-client.js && node --check src/agent/ai/action-planner.js && node --check src/agent/browser-actions.js && node --check src/agent/cli.js && node --check src/agent/runtime.js && node --check src/browser/chrome-controller.js && node --check src/storage/task-store.js && node --check src/storage/settings-store.js"
   },
   "dependencies": {
-    "dotenv": "^17.4.2",
-    "electron-updater": "^6.8.9"
+    "dotenv": "^17.4.2"
   },
   "devDependencies": {
     "@electron/notarize": "^3.1.1",
@@ -41,8 +36,8 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "ai.penut.operator",
-    "productName": "Penut Operator",
+    "appId": "app.browseroperator.desktop",
+    "productName": "Browser Operator",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "asar": true,
     "files": [
@@ -96,12 +91,6 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true
-    },
-    "publish": [
-      {
-        "provider": "generic",
-        "url": "https://penut.ai/operator/updates"
-      }
-    ]
+    }
   }
 }

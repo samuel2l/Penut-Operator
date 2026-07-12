@@ -25,32 +25,20 @@ def emit(event_type, message, detail=None):
 
 
 def prepare_worker_cwd():
-    raw = os.getenv("PENUT_OPERATOR_WORKER_CWD", "").strip()
-    worker_cwd = Path(raw) if raw else Path(os.getenv("TMPDIR", "/tmp")) / "penut-operator-worker"
+    raw = os.getenv("OPERATOR_WORKER_CWD", "").strip()
+    worker_cwd = Path(raw) if raw else Path(os.getenv("TMPDIR", "/tmp")) / "browser-operator-worker"
     worker_cwd.mkdir(parents=True, exist_ok=True)
     os.chdir(worker_cwd)
     return str(worker_cwd)
-
-
-def uses_penet_proxy():
-    return bool(os.getenv("OPENAI_BASE_URL", "").strip()) or os.getenv(
-        "PENUT_OPERATOR_PLANNER",
-        "",
-    ).strip().lower() == "backend"
 
 
 def build_llm():
     llm_kwargs = {
         "model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
     }
-    base_url = os.getenv("OPENAI_BASE_URL", "").strip()
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if base_url:
-        llm_kwargs["base_url"] = base_url
     if api_key:
         llm_kwargs["api_key"] = api_key
-    if uses_penet_proxy():
-        llm_kwargs["reasoning_models"] = []
     return ChatOpenAI(**llm_kwargs)
 
 
@@ -79,11 +67,13 @@ def friendly_error_message(raw):
         return "Task could not finish."
     lowered = text.lower()
     if "payload too large" in lowered or "request entity too large" in lowered:
-        return "Penut rejected the planning request because it was too large. The Penut server limit needs to match what local OpenAI accepts."
+        return "The planning request was too large."
     if text.startswith("Result files:"):
         return "The browser agent returned a local file listing instead of completing the task."
+    if "incorrect api key" in lowered or "invalid api key" in lowered or "authentication" in lowered:
+        return "OpenAI rejected the API key. Check OPENAI_API_KEY in your .env file."
     if "<!doctype html" in lowered or "<html" in lowered:
-        return "Penut could not process the browser planning request."
+        return "The model provider returned an unexpected response."
     if len(text) > 240:
         return f"{text[:237]}..."
     return text
@@ -130,7 +120,6 @@ async def run_task(task_prompt):
     prepare_worker_cwd()
     emit("agent", "Starting task.")
 
-    browser_started_at = time.perf_counter()
     agent = Agent(**build_agent_kwargs(task_prompt))
     emit("agent", "Browser is ready.")
 

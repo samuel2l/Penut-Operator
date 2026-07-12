@@ -1,18 +1,14 @@
 import path from "node:path";
 import dotenv from "dotenv";
-import crypto from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { execFile } from "node:child_process";
 import os from "node:os";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import electronUpdater from "electron-updater";
 import { createTaskStore } from "../storage/task-store.js";
 import { createSettingsStore } from "../storage/settings-store.js";
-import { createOperatorAuthStore } from "../storage/auth-store.js";
-import { createPenutApiClient } from "../penut/penut-api-client.js";
-import { getOperatorEnvironment, shouldLoadDotenv, shouldUseBackendPlanner } from "../config/environment.js";
+import { shouldLoadDotenv } from "../config/environment.js";
 
 if (shouldLoadDotenv()) {
   dotenv.config();
@@ -20,17 +16,13 @@ if (shouldLoadDotenv()) {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
-const { autoUpdater } = electronUpdater;
+const { app, BrowserWindow, ipcMain } = require("electron");
 const taskStore = createTaskStore();
 const settingsStore = createSettingsStore();
-const authStore = createOperatorAuthStore();
-const PROJECT_DATA_DIR = path.join(path.resolve(__dirname, "../.."), "data");
-const STARTUP_SMOKE_TEST = process.env.PENUT_OPERATOR_SMOKE_STARTUP === "1";
+const STARTUP_SMOKE_TEST = process.env.OPERATOR_SMOKE_STARTUP === "1";
 const BROWSER_OPEN_TIMEOUT_MS = 90000;
 let mainWindow;
 let activeRun;
-let pendingDeviceLogin;
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -38,7 +30,7 @@ function createMainWindow() {
     height: 760,
     minWidth: 980,
     minHeight: 640,
-    title: "Penut Operator",
+    title: "Browser Operator",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -63,16 +55,12 @@ function createMainWindow() {
 }
 
 app.whenReady().then(() => {
-  const operatorEnvironment = getOperatorEnvironment();
   console.log("[operator] runtime", sanitizeLogDetail({
-    channel: operatorEnvironment.channel,
-    planner: operatorEnvironment.plannerMode,
-    apiBaseUrl: operatorEnvironment.apiBaseUrl,
-    simulatePackaged: operatorEnvironment.simulatePackaged,
     dotenvLoaded: shouldLoadDotenv(),
+    hasOpenAiKey: Boolean(process.env.OPENAI_API_KEY),
+    model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   }));
   createMainWindow();
-  setupAutoUpdates();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
@@ -83,39 +71,10 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-function setupAutoUpdates() {
-  if (!app.isPackaged) return;
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.on("error", (error) => {
-    console.log("[update] check_failed", sanitizeLogDetail({ error }));
-  });
-  autoUpdater.on("update-downloaded", () => {
-    console.log("[update] downloaded");
-  });
-  autoUpdater.checkForUpdatesAndNotify().catch((error) => {
-    console.log("[update] check_failed", sanitizeLogDetail({ error }));
-  });
-}
-
-ipcMain.handle("tasks:get", async () => syncTasksFromPenut());
+ipcMain.handle("tasks:get", async () => taskStore.getState());
 
 ipcMain.handle("tasks:select", async (_event, taskId) => {
-  let state = await taskStore.selectTask(taskId);
-  const task = state.tasks.find((item) => item.id === state.selectedTaskId);
-  const settings = await settingsStore.getSettings();
-  const client = createPenutApiClient(settings, { authStore });
-  if (task?.remoteId && client.isConfigured) {
-    try {
-      const payload = await client.readTask(task.remoteId);
-      await taskStore.updateTask(task.id, {
-        events: mapRemoteEvents(payload.events || []),
-      });
-      state = await taskStore.getState();
-    } catch {
-      // Keep the cached task visible even if event refresh fails.
-    }
-  }
+  const state = await taskStore.selectTask(taskId);
   mainWindow?.webContents.send("tasks:changed", state);
   return state;
 });
@@ -140,9 +99,7 @@ ipcMain.handle("tasks:approve", async () => {
   return state;
 });
 
-ipcMain.handle("settings:get", async () => {
-  return settingsPayload();
-});
+ipcMain.handle("settings:get", async () => settingsPayload());
 
 ipcMain.handle("settings:update", async (_event, patch) => {
   await settingsStore.updateSettings(patch);
@@ -165,188 +122,15 @@ ipcMain.handle("runtime:repair", async () => {
   }
 });
 
-ipcMain.handle("auth:start", async () => {
-  const settings = await settingsStore.getSettings();
-  const client = createPenutApiClient(settings, { authStore });
-  logAuth("start_requested", {
-    apiConfigured: client.hasBaseUrl,
-    hasExistingAccessToken: client.hasAccessToken,
-  });
-  let authorization;
-  try {
-    authorization = await client.initDeviceLogin();
-  } catch (error) {
-    logAuth("start_failed", {
-      error: friendlyPenutConnectionError(error),
-      action: friendlyPenutConnectionAction(error),
-      raw: safeErrorSummary(error),
-    });
-    return {
-      ok: false,
-      error: friendlyPenutConnectionAction(error),
-      detail: friendlyPenutConnectionError(error),
-    };
-  }
-  const deviceCode = authorization.deviceCode || authorization.device_code;
-  const verifyUrl =
-    authorization.verificationUriComplete ||
-    authorization.verification_uri_complete ||
-    authorization.verificationUri ||
-    authorization.verification_uri;
-  pendingDeviceLogin = {
-    deviceCode,
-    userCode: authorization.userCode || authorization.user_code || "",
-    verificationUrl: verifyUrl || "",
-    expiresAt:
-      Date.now() +
-      Math.max(1, authorization.expiresIn || authorization.expires_in || 600) *
-        1000,
-  };
-  savePendingDeviceLogin(pendingDeviceLogin);
-  logAuth("pending_saved", {
-    userCode: pendingDeviceLogin.userCode,
-    hasVerificationUrl: Boolean(verifyUrl),
-    expiresAt: new Date(pendingDeviceLogin.expiresAt).toISOString(),
-  });
-  if (verifyUrl) {
-    await shell.openExternal(verifyUrl);
-    logAuth("browser_opened", {
-      userCode: pendingDeviceLogin.userCode,
-    });
-  }
-  return {
-    ok: true,
-    userCode: pendingDeviceLogin.userCode,
-    verificationUrl: verifyUrl || "",
-    expiresAt: new Date(pendingDeviceLogin.expiresAt).toISOString(),
-  };
-});
-
-ipcMain.handle("auth:pending", async () => {
-  const pending = getPendingDeviceLogin();
-  if (!pending) return { pending: false };
-  if (Date.now() > pending.expiresAt) {
-    clearPendingDeviceLogin();
-    logAuth("pending_expired", {
-      userCode: pending.userCode || "",
-    });
-    return { pending: false, expired: true };
-  }
-  return {
-    pending: true,
-    userCode: pending.userCode || "",
-    verificationUrl: pending.verificationUrl || "",
-    expiresAt: new Date(pending.expiresAt).toISOString(),
-  };
-});
-
-ipcMain.handle("auth:open-pending", async () => {
-  const pending = getPendingDeviceLogin();
-  if (!pending?.verificationUrl) {
-    logAuth("reopen_missing_url");
-    return { ok: false, error: "No approval page is available. Start sign-in again." };
-  }
-  await shell.openExternal(pending.verificationUrl);
-  logAuth("browser_reopened", {
-    userCode: pending.userCode || "",
-  });
-  return { ok: true };
-});
-
-ipcMain.handle("auth:cancel", async () => {
-  const pending = getPendingDeviceLogin();
-  clearPendingDeviceLogin();
-  logAuth("cancelled", {
-    userCode: pending?.userCode || "",
-  });
-  return settingsPayload();
-});
-
-ipcMain.handle("auth:poll", async () => {
-  const pending = getPendingDeviceLogin();
-  if (!pending?.deviceCode) {
-    logAuth("poll_no_pending");
-    return { authenticated: false, pending: false };
-  }
-  if (Date.now() > pending.expiresAt) {
-    clearPendingDeviceLogin();
-    logAuth("poll_expired", {
-      userCode: pending.userCode || "",
-    });
-    return {
-      authenticated: false,
-      pending: false,
-      error: "Sign-in expired. Try again.",
-    };
-  }
-  const settings = await settingsStore.getSettings();
-  const client = createPenutApiClient(settings, { authStore });
-  try {
-    logAuth("poll_requested", {
-      userCode: pending.userCode || "",
-    });
-    await client.pollDeviceLogin(pending.deviceCode);
-    logAuth("poll_approved_token_saved", {
-      userCode: pending.userCode || "",
-    });
-    const payload = await settingsPayload();
-    if (!payload.auth) {
-      logAuth("session_verify_failed", {
-        userCode: pending.userCode || "",
-      });
-      return {
-        authenticated: false,
-        pending: false,
-        error: "Operator received approval, but could not verify your Penut session. Try signing in again.",
-      };
-    }
-    clearPendingDeviceLogin();
-    logAuth("connected_verified", {
-      account: payload.auth.account || "Signed in",
-      project: payload.auth.project || null,
-    });
-    return { authenticated: true, settings: payload };
-  } catch (error) {
-    if (isAuthorizationPending(error)) {
-      logAuth("poll_pending", {
-        userCode: pending.userCode || "",
-      });
-      return { authenticated: false, pending: true };
-    }
-    clearPendingDeviceLogin();
-    logAuth("poll_failed", {
-      userCode: pending.userCode || "",
-      error: friendlyPenutConnectionError(error),
-      raw: safeErrorSummary(error),
-    });
-    return {
-      authenticated: false,
-      pending: false,
-      error: friendlyPenutConnectionError(error),
-    };
-  }
-});
-
-ipcMain.handle("auth:logout", async () => {
-  const settings = await settingsStore.getSettings();
-  const client = createPenutApiClient(settings, { authStore });
-  await client.logout();
-  clearPendingDeviceLogin();
-  logAuth("logged_out");
-  return settingsPayload();
-});
-
 ipcMain.handle("agent:run", async (_event, prompt) => {
   if (activeRun) {
     return { ok: false, error: "An Operator run is already active." };
   }
   const currentTask = await taskStore.getActiveTask();
   if (!currentTask) {
-    return { ok: false, error: "Create or select a task before approving it." };
+    return { ok: false, error: "Create or select a task before running it." };
   }
-  return runSelectedTasks([currentTask.id], { [currentTask.id]: prompt }, {
-    allowDetailRun: true,
-  });
+  return runSelectedTasks([currentTask.id], { [currentTask.id]: prompt });
 });
 
 ipcMain.handle("agent:run-tasks", async (_event, taskIds, promptByTaskId = {}) => {
@@ -356,7 +140,7 @@ ipcMain.handle("agent:run-tasks", async (_event, taskIds, promptByTaskId = {}) =
   return runSelectedTasks(taskIds, promptByTaskId);
 });
 
-async function runSelectedTasks(taskIds, promptByTaskId = {}, options = {}) {
+async function runSelectedTasks(taskIds, promptByTaskId = {}) {
   const selectedIds = Array.isArray(taskIds)
     ? [...new Set(taskIds.filter((id) => typeof id === "string" && id))]
     : [];
@@ -367,7 +151,7 @@ async function runSelectedTasks(taskIds, promptByTaskId = {}, options = {}) {
   const state = await taskStore.getState();
   const tasksById = new Map(state.tasks.map((task) => [task.id, task]));
   const tasks = selectedIds.map((id) => tasksById.get(id)).filter(Boolean);
-  const blockedTask = tasks.find((task) => !taskCanRun(task, options));
+  const blockedTask = tasks.find((task) => !taskCanRun(task));
   if (blockedTask) {
     return {
       ok: false,
@@ -408,11 +192,8 @@ async function runSelectedTasks(taskIds, promptByTaskId = {}, options = {}) {
   };
 }
 
-function taskCanRun(task, options = {}) {
-  if (options.allowDetailRun) {
-    return ["pending", "approved", "failed", "stopped"].includes(task?.status);
-  }
-  return ["approved", "failed", "stopped", "expired"].includes(task?.status);
+function taskCanRun(task) {
+  return ["pending", "approved", "failed", "stopped", "expired"].includes(task?.status);
 }
 
 async function runOneTask(taskId, prompt, settings) {
@@ -422,64 +203,22 @@ async function runOneTask(taskId, prompt, settings) {
   }
 
   const cleanPrompt = String(prompt || existing.prompt || "").trim();
-  const shouldApproveRemoteTask =
-    existing.remoteId &&
-    existing.status === "pending";
-  const shouldRetryRemoteTask =
-    existing.remoteId &&
-    ["failed", "stopped", "expired"].includes(existing.status);
-  let task = await taskStore.updateTask(taskId, {
+  const task = await taskStore.updateTask(taskId, {
     prompt: cleanPrompt,
-    status: "approved",
+    status: "running",
   });
-
-  const penutClient = createPenutApiClient(settings, { authStore });
-  if (task.remoteId && penutClient.isConfigured) {
-    if (shouldRetryRemoteTask) {
-      await penutClient.retryTask(task.remoteId, { editedPrompt: cleanPrompt });
-    } else if (shouldApproveRemoteTask) {
-      await penutClient.approveTask(task.remoteId, { editedPrompt: cleanPrompt });
-    }
-  } else if (!task.remoteId && penutClient.isConfigured) {
-    const session = await penutClient.readSession();
-    const assignedMemberId = session.currentMemberId;
-    if (!assignedMemberId) {
-      throw new Error("Penut could not find your current member. Sign in again, then reopen Operator.");
-    }
-    const created = await penutClient.createTask({
-      title: "Operator task",
-      prompt: cleanPrompt,
-      assignedMemberId,
-    });
-    const remoteTask = created.task || {};
-    task = await taskStore.updateTask(task.id, {
-      remoteId: remoteTask.id,
-      approvalRequestId: remoteTask.approvalRequestId || null,
-      approvalActionId: remoteTask.approvalActionId || null,
-      status: "approved",
-    });
-  }
-
-  if (task.remoteId && penutClient.isConfigured) {
-    await penutClient.claimTask(task.remoteId, { leaseSeconds: 900 });
-    await penutClient.updateStatus(task.remoteId, { status: "running" });
-    task = await taskStore.updateTask(task.id, { status: "running" });
-  }
 
   activeRun = {
     taskId: task.id,
-    remoteId: task.remoteId || null,
     stopped: false,
     stop: () => {},
   };
-  await taskStore.updateTask(task.id, { status: "running" });
   mainWindow?.webContents.send("tasks:changed", await taskStore.getState());
 
   try {
     const result = await runBrowserUseWorker(task, settings, async (event) => {
       try {
         await taskStore.appendEvent(event, task.id);
-        await sendRemoteEventIfNeeded(penutClient, task, event);
         mainWindow?.webContents.send("tasks:changed", await taskStore.getState());
       } catch (error) {
         await taskStore.appendEvent({
@@ -493,38 +232,11 @@ async function runOneTask(taskId, prompt, settings) {
       return { ok: false, stopped: true, state: await taskStore.getState() };
     }
     const status = result.ok ? "completed" : "failed";
-    if (task.remoteId && penutClient.isConfigured) {
-      const terminalUpdate = {
-        status,
-        ...(result.ok ? { result: { message: result.result } } : { error: { message: result.result } }),
-      };
-      await penutClient.updateStatus(task.remoteId, terminalUpdate).then(async () => {
-        await taskStore.updateTask(task.id, { pendingTerminalUpdate: null });
-      }).catch(async (error) => {
-        await taskStore.updateTask(task.id, { pendingTerminalUpdate: terminalUpdate });
-        await taskStore.appendEvent({
-          type: "system",
-          message: "Task finished locally, but Penut could not be updated.",
-          detail: { error: error.message },
-        }, task.id).catch(() => {});
-      });
-    }
     const updatedTask = await taskStore.updateTask(task.id, { status });
     return { ...result, task: updatedTask, state: await taskStore.getState() };
   } catch (error) {
     if (activeRun?.taskId === task.id && activeRun.stopped) {
       return { ok: false, stopped: true, state: await taskStore.getState() };
-    }
-    if (task.remoteId && penutClient.isConfigured) {
-      const terminalUpdate = {
-        status: "failed",
-        error: { message: error.message },
-      };
-      await penutClient.updateStatus(task.remoteId, terminalUpdate).then(async () => {
-        await taskStore.updateTask(task.id, { pendingTerminalUpdate: null });
-      }).catch(async () => {
-        await taskStore.updateTask(task.id, { pendingTerminalUpdate: terminalUpdate });
-      });
     }
     await taskStore.appendEvent({
       type: "agent",
@@ -544,13 +256,6 @@ ipcMain.handle("agent:stop", async () => {
   const runningTask = activeRun;
   runningTask.stopped = true;
   runningTask.stop();
-  const settings = await settingsStore.getSettings();
-  const penutClient = createPenutApiClient(settings, { authStore });
-  if (runningTask.remoteId && penutClient.isConfigured) {
-    await penutClient.updateStatus(runningTask.remoteId, {
-      status: "cancelled",
-    }).catch(() => {});
-  }
   await taskStore.appendEvent({
     type: "status",
     message: "Stopped by you.",
@@ -562,134 +267,20 @@ ipcMain.handle("agent:stop", async () => {
   return { ok: true, state };
 });
 
-async function syncTasksFromPenut() {
-  const settings = await settingsStore.getSettings();
-  const client = createPenutApiClient(settings, { authStore });
-  if (!client.isConfigured) {
-    return taskStore.setSyncError(
-      "Sign in to Penut to load browser tasks.",
-      "auth_required",
-    );
-  }
-
-  try {
-    const payload = await client.listTasks();
-    await reconcileTerminalLocalTasks(client, payload.tasks || []);
-    const state = await taskStore.mergeRemoteTasks(payload.tasks || []);
-    return state;
-  } catch (error) {
-    return taskStore.setSyncError(
-      `Could not sync tasks from Penut. ${friendlyPenutConnectionError(error)}`,
-      isAuthError(error) ? "auth_required" : "connection_error",
-    );
-  }
-}
-
 async function settingsPayload() {
   const settings = await settingsStore.getSettings();
   return {
     settings,
     chromeProfiles: await settingsStore.listChromeProfiles(),
     readiness: await getRunReadiness(settings),
-    auth: await readAuthSummary(settings),
   };
-}
-
-async function readAuthSummary(settings) {
-  const client = createPenutApiClient(settings, { authStore });
-  if (!client.isConfigured) return null;
-  try {
-    const session = await client.readSession();
-    const identity = session.currentMember || session.members?.find((member) => {
-      return member.id === session.currentMemberId;
-    });
-    const account = identity?.email || identity?.name || "Signed in";
-    const project = session.currentProject?.name;
-    return {
-      label: project ? `Signed in as ${account} · ${project}` : `Signed in as ${account}`,
-      account,
-      project: project || null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function reconcileTerminalLocalTasks(client, remoteTasks) {
-  const state = await taskStore.getState();
-  const remoteById = new Map(remoteTasks.map((task) => [task.id, task]));
-  await Promise.all((state.tasks || []).map(async (task) => {
-    if (!task.remoteId || !["completed", "failed", "stopped"].includes(task.status)) return;
-    const remote = remoteById.get(task.remoteId);
-    if (!remote || !["claimed", "running", "approved"].includes(remote.status)) return;
-    const status = task.status === "stopped" ? "cancelled" : task.status;
-    const terminalUpdate = task.pendingTerminalUpdate || {
-      status,
-      ...(status === "completed"
-        ? { result: { message: "Task completed locally." } }
-        : { error: { message: "Task did not complete locally." } }),
-    };
-    await client.updateStatus(task.remoteId, terminalUpdate).then(async () => {
-      await taskStore.updateTask(task.id, { pendingTerminalUpdate: null });
-    }).catch(() => {});
-  }));
-}
-
-function getPendingDeviceLogin() {
-  if (pendingDeviceLogin?.deviceCode) return pendingDeviceLogin;
-  try {
-    const raw = JSON.parse(readFileSync(pendingDeviceLoginFile(), "utf8"));
-    if (!raw?.deviceCode || !raw?.expiresAt) return null;
-    pendingDeviceLogin = {
-      deviceCode: String(raw.deviceCode),
-      userCode: typeof raw.userCode === "string" ? raw.userCode : "",
-      verificationUrl:
-        typeof raw.verificationUrl === "string" ? raw.verificationUrl : "",
-      expiresAt: Number(raw.expiresAt),
-    };
-    return pendingDeviceLogin;
-  } catch {
-    return null;
-  }
-}
-
-function savePendingDeviceLogin(login) {
-  mkdirSync(operatorDataDir(), { recursive: true });
-  writeFileSync(pendingDeviceLoginFile(), `${JSON.stringify(login, null, 2)}\n`, {
-    mode: 0o600,
-  });
-}
-
-function clearPendingDeviceLogin() {
-  pendingDeviceLogin = null;
-  try {
-    unlinkSync(pendingDeviceLoginFile());
-  } catch {
-    // Nothing to clear.
-  }
-}
-
-function operatorDataDir() {
-  return app.isPackaged
-    ? path.join(app.getPath("userData"), "data")
-    : PROJECT_DATA_DIR;
-}
-
-function pendingDeviceLoginFile() {
-  return path.join(operatorDataDir(), "pending-device-login.json");
-}
-
-function logAuth(event, detail = {}) {
-  const payload = sanitizeLogDetail(detail);
-  const suffix = Object.keys(payload).length ? ` ${JSON.stringify(payload)}` : "";
-  console.log(`[auth] ${event}${suffix}`);
 }
 
 function sanitizeLogDetail(detail) {
   if (!detail || typeof detail !== "object") return {};
   return Object.fromEntries(
     Object.entries(detail).map(([key, value]) => {
-      if (/^(token|accessToken|refreshToken|deviceCode|secret|key|authorization)$/i.test(key)) {
+      if (/^(token|accessToken|refreshToken|secret|key|authorization|apiKey)$/i.test(key)) {
         return [key, "[redacted]"];
       }
       if (value instanceof Error) return [key, value.message];
@@ -701,62 +292,16 @@ function sanitizeLogDetail(detail) {
   );
 }
 
-function isAuthorizationPending(error) {
-  const message = String(error?.message || "");
-  const body = error?.body || {};
-  return /authorization[\s_-]?pending/i.test(message) ||
-    /authorization[\s_-]?pending/i.test(String(body.error || "")) ||
-    /authorization[\s_-]?pending/i.test(String(body.error_description || ""));
-}
-
-function safeErrorSummary(error) {
-  const body = error?.body || {};
-  return {
-    status: error?.status || null,
-    message: error?.message || "",
-    error: body.error || null,
-    errorDescription: body.error_description || null,
-    code: body.code || null,
-    suggestion: body.suggestion || null,
-  };
-}
-
-async function sendRemoteEventIfNeeded(client, task, event) {
-  if (!task.remoteId || !client.isConfigured) return;
-  await client.addEvent(task.remoteId, {
-    eventType: mapEventType(event.type),
-    message: event.message || "Task update.",
-    detail: event.detail || {},
-  }).catch(() => {});
-}
-
-function mapEventType(type) {
-  if (["system", "status", "browser", "agent", "result", "error"].includes(type)) {
-    return type;
-  }
-  if (type === "complete") return "result";
-  return "agent";
-}
-
-function mapRemoteEvents(events) {
-  return events.map((event) => ({
-    id: event.id || `event_${crypto.randomUUID()}`,
-    type: event.eventType || "agent",
-    message: event.message || "Task update.",
-    detail: event.detail || {},
-    at: event.createdAt || new Date().toISOString(),
-  })).reverse();
-}
-
 function workerScratchDir() {
   const workerDir = path.join(app.getPath("userData"), "worker");
   mkdirSync(workerDir, { recursive: true });
   return workerDir;
 }
 
-function buildWorkerEnv(task, settings, operatorEnvironment, session) {
+function buildWorkerEnv(settings) {
   const workerCwd = workerScratchDir();
-  const shared = {
+  return {
+    ...process.env,
     PATH: process.env.PATH || "",
     HOME: process.env.HOME || os.homedir(),
     USER: process.env.USER || "",
@@ -769,30 +314,11 @@ function buildWorkerEnv(task, settings, operatorEnvironment, session) {
           USERPROFILE: process.env.USERPROFILE || "",
         }
       : {}),
-    PENUT_OPERATOR_WORKER_CWD: workerCwd,
+    OPERATOR_WORKER_CWD: workerCwd,
     BROWSER_USE_CHROME_USER_DATA_DIR: settings.chromeUserDataDir,
     BROWSER_USE_CHROME_PROFILE_DIRECTORY: settings.chromeProfileDirectory,
-    PENUT_OPERATOR_CHANNEL: operatorEnvironment.channel,
-    PENUT_OPERATOR_PLANNER: operatorEnvironment.plannerMode,
-    PENUT_API_BASE_URL: operatorEnvironment.apiBaseUrl,
-  };
-
-  if (shouldUseBackendPlanner() && session.accessToken) {
-    return {
-      ...shared,
-      PENUT_OPERATOR_ACCESS_TOKEN: session.accessToken,
-      OPENAI_API_KEY: session.accessToken,
-      ...(task.remoteId
-        ? {
-            OPENAI_BASE_URL: `${operatorEnvironment.apiBaseUrl}/browser/tasks/${task.remoteId}/openai/v1`,
-          }
-        : {}),
-    };
-  }
-
-  return {
-    ...process.env,
-    ...shared,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
+    OPENAI_MODEL: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   };
 }
 
@@ -805,19 +331,14 @@ function runBrowserUseWorker(task, settings, onEvent) {
     const paths = getRuntimePaths();
     const workerPath = paths.workerPath;
     const pythonPath = paths.pythonPath;
-    const operatorEnvironment = getOperatorEnvironment();
-    const session = authStore.readSession();
-    const env = buildWorkerEnv(task, settings, operatorEnvironment, session);
-    const workerCwd = env.PENUT_OPERATOR_WORKER_CWD;
+    const env = buildWorkerEnv(settings);
+    const workerCwd = env.OPERATOR_WORKER_CWD;
     console.log("[worker] launch", sanitizeLogDetail({
       pythonPath,
       workerPath,
       workerCwd,
-      channel: operatorEnvironment.channel,
-      planner: operatorEnvironment.plannerMode,
-      remoteId: task.remoteId || null,
-      hasOpenAiBaseUrl: Boolean(env.OPENAI_BASE_URL),
-      simulatePackaged: operatorEnvironment.simulatePackaged,
+      hasOpenAiKey: Boolean(env.OPENAI_API_KEY),
+      model: env.OPENAI_MODEL,
     }));
     const child = execFile(
       pythonPath,
@@ -916,7 +437,6 @@ function runBrowserUseWorker(task, settings, onEvent) {
 
     if (activeRun?.taskId === task.id) {
       activeRun.stop = () => child.kill("SIGTERM");
-      activeRun.remoteId = task.remoteId || null;
     }
   });
 }
@@ -935,9 +455,8 @@ function browserOpenTimeoutMessage(settings) {
 async function getRunReadiness(settings) {
   const paths = getRuntimePaths();
   const checks = [
-    await checkPenutConnection(settings),
     checkChromeProfile(settings),
-    await checkModelAccess(settings),
+    checkModelAccess(),
     await checkPython(paths.pythonPath),
     checkWorker(paths.workerPath),
     await checkBrowserUse(paths.pythonPath),
@@ -1040,89 +559,6 @@ function hostPythonCommand() {
   return process.platform === "win32" ? "python" : "python3";
 }
 
-async function checkPenutConnection(settings) {
-  const client = createPenutApiClient(settings, { authStore });
-  if (!client.hasBaseUrl) {
-    return {
-      id: "penutConnection",
-      label: "Penut connection",
-      ready: false,
-      message: "Penut is not configured on this computer.",
-      action: "Sign in to Penut in Operator settings.",
-    };
-  }
-
-  if (!client.hasAccessToken) {
-    return {
-      id: "penutConnection",
-      label: "Penut connection",
-      ready: false,
-      message: "You need to sign in to Penut.",
-      action: "Sign in to Penut in Operator settings.",
-    };
-  }
-
-  try {
-    await client.readSession();
-  } catch (error) {
-    return {
-      id: "penutConnection",
-      label: "Penut connection",
-      ready: false,
-      message: friendlyPenutConnectionError(error),
-      action: friendlyPenutConnectionAction(error),
-    };
-  }
-
-  return {
-    id: "penutConnection",
-    label: "Penut connection",
-    ready: true,
-    message: "Signed in to Penut.",
-    action: "No action needed.",
-  };
-}
-
-function friendlyPenutConnectionError(error) {
-  const message = String(error?.message || "");
-  if (/expired|401|unauthorized|sign in|login/i.test(message)) {
-    return "Your Penut session expired. Sign in again to continue.";
-  }
-  if (/404|not found/i.test(message)) {
-    return "This Penut server does not support Operator sign-in yet.";
-  }
-  if (/secure storage|cannot save|could not save/i.test(message)) {
-    return "Operator connected, but this computer could not save the sign-in securely.";
-  }
-  if (/fetch failed|network|ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(message)) {
-    return "Cannot reach Penut right now. Check your connection and try again.";
-  }
-  return "Penut could not verify your session.";
-}
-
-function isAuthError(error) {
-  return /expired|401|unauthorized|sign in|login/i.test(
-    String(error?.message || ""),
-  );
-}
-
-function friendlyPenutConnectionAction(error) {
-  const message = String(error?.message || "");
-  if (/expired|401|unauthorized|sign in|login/i.test(message)) {
-    return "Sign in to Penut again from Operator settings.";
-  }
-  if (/404|not found/i.test(message)) {
-    return "Operator sign-in is not available on this Penut server yet. Update the server, then try again.";
-  }
-  if (/secure storage|cannot save|could not save/i.test(message)) {
-    return "Restart Operator and try signing in again. If it keeps happening, check macOS Keychain access.";
-  }
-  if (/fetch failed|network|ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(message)) {
-    return "Check your internet connection, then refresh Operator.";
-  }
-  return "Refresh Operator or sign in to Penut again from Operator settings.";
-}
-
 function checkChromeProfile(settings) {
   const profilePath = settings.chromeProfileDirectory
     ? path.join(settings.chromeUserDataDir, settings.chromeProfileDirectory)
@@ -1139,49 +575,16 @@ function checkChromeProfile(settings) {
   };
 }
 
-async function checkModelAccess(settings) {
-  if (shouldUseBackendPlanner()) {
-    const client = createPenutApiClient(settings, { authStore });
-    if (!client.isConfigured) {
-      return {
-        id: "modelAccess",
-        label: "Model access",
-        ready: false,
-        message: "Sign in to Penut to use hosted model access.",
-        action: "Sign in to Penut in Operator settings.",
-      };
-    }
-    try {
-      const health = await client.readPlannerHealth();
-      return {
-        id: "modelAccess",
-        label: "Model access",
-        ready: Boolean(health.ready),
-        message: health.ready
-          ? "Model access is handled by Penut."
-          : "Penut model access is not configured yet.",
-        action: health.ready
-          ? "No action needed."
-          : "Ask the Penut workspace admin to configure Operator model access.",
-      };
-    } catch (error) {
-      return {
-        id: "modelAccess",
-        label: "Model access",
-        ready: false,
-        message: friendlyPenutConnectionError(error),
-        action: friendlyPenutConnectionAction(error),
-      };
-    }
-  }
-
+function checkModelAccess() {
   const ready = Boolean(process.env.OPENAI_API_KEY);
   return {
     id: "modelAccess",
-    label: "Model access",
+    label: "OpenAI access",
     ready,
-    message: ready ? "Model access is configured." : "Model access is not configured yet.",
-    action: "Add model access before running tasks.",
+    message: ready
+      ? `Using ${process.env.OPENAI_MODEL || "gpt-4.1-mini"}.`
+      : "OPENAI_API_KEY is not set.",
+    action: "Add OPENAI_API_KEY to your .env file, then restart Operator.",
   };
 }
 
@@ -1258,7 +661,7 @@ function formatWorkerLog(line, source) {
     return "";
   }
   if (/payload too large|request entity too large/i.test(normalized)) {
-    return "Penut rejected the planning request because it was too large.";
+    return "The planning request was too large.";
   }
   if (/^RuntimeError:/i.test(normalized)) return "";
   if (/^During handling of the above exception/i.test(normalized)) return "";
@@ -1272,8 +675,6 @@ function formatWorkerLog(line, source) {
   if (/^INFO\s+\[/.test(normalized)) return "";
   if (/^WARNING\s+\[/.test(normalized)) return "";
   if (/^ERROR\s+\[/.test(normalized)) return "";
-  if (/^\[penut-worker\]/i.test(normalized)) return "";
-  if (/^\{"workerCwd":/.test(normalized)) return "";
   if (/^\(node:/.test(normalized)) return "";
   if (/UnhandledPromiseRejectionWarning/i.test(normalized)) return "";
   if (/Traceback/i.test(normalized)) return "";

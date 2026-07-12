@@ -16,7 +16,7 @@ const newTaskBtn = document.querySelector("#newTaskBtn");
 const runSelectedBtn = document.querySelector("#runSelectedBtn");
 const selectionHelp = document.querySelector("#selectionHelp");
 const backBtn = document.querySelector("#backBtn");
-const approvalsNavBtn = document.querySelector("#approvalsNavBtn");
+const tasksNavBtn = document.querySelector("#tasksNavBtn");
 const settingsNavBtn = document.querySelector("#settingsNavBtn");
 const chromeProfileSelect = document.querySelector("#chromeProfileSelect");
 const profileHelp = document.querySelector("#profileHelp");
@@ -24,13 +24,6 @@ const saveSettingsBtn = document.querySelector("#saveSettingsBtn");
 const readinessList = document.querySelector("#readinessList");
 const runtimeRepairActions = document.querySelector("#runtimeRepairActions");
 const repairRuntimeBtn = document.querySelector("#repairRuntimeBtn");
-const authHelp = document.querySelector("#authHelp");
-const authCard = document.querySelector(".auth-card");
-const authCode = document.querySelector("#authCode");
-const signInBtn = document.querySelector("#signInBtn");
-const reopenAuthBtn = document.querySelector("#reopenAuthBtn");
-const cancelAuthBtn = document.querySelector("#cancelAuthBtn");
-const signOutBtn = document.querySelector("#signOutBtn");
 const saveTaskBtn = document.querySelector("#saveTaskBtn");
 const approveBtn = document.querySelector("#approveBtn");
 const stopBtn = document.querySelector("#stopBtn");
@@ -41,12 +34,9 @@ let currentState;
 let selectedTaskId;
 let currentScreen = "list";
 let currentSettings;
-let currentAuth;
 let chromeProfileData = { userDataDir: "", profiles: [] };
 let currentReadiness = { ready: false, checks: [] };
-let currentPendingAuth;
 let refreshInProgress = false;
-let authPollTimer;
 let selectedRunTaskIds = new Set();
 
 function humanStatus(status) {
@@ -57,7 +47,7 @@ function readableStatus(status) {
   const normalized = String(status || "unknown");
   const map = {
     draft: "Draft",
-    pending: "Waiting for approval",
+    pending: "Draft",
     approved: "Ready",
     running: "Working",
     completed: "Done",
@@ -122,7 +112,7 @@ function selectedTask(state) {
 }
 
 function taskCanRun(task) {
-  return ["approved", "failed", "stopped", "expired"].includes(task?.status);
+  return ["approved", "failed", "stopped", "expired", "pending"].includes(task?.status);
 }
 
 function taskPreview(task) {
@@ -133,7 +123,7 @@ function taskPreview(task) {
 
 function setScreen(screen) {
   currentScreen = screen;
-  approvalsNavBtn.classList.toggle("active", screen !== "settings");
+  tasksNavBtn.classList.toggle("active", screen !== "settings");
   settingsNavBtn.classList.toggle("active", screen === "settings");
 }
 
@@ -142,71 +132,43 @@ function render(state) {
   const task = selectedTask(state);
   const isSettings = currentScreen === "settings";
   const isDetail = currentScreen === "detail";
-  const signedIn = isPenutSignedIn();
   settingsScreen.classList.toggle("hidden", !isSettings);
   listScreen.classList.toggle("hidden", isDetail || isSettings);
   detailScreen.classList.toggle("hidden", !isDetail || isSettings);
-
-  if (!isSettings && !signedIn) {
-    const syncState = describeSyncState(state);
-    taskDetails.classList.add("hidden");
-    emptyState.classList.toggle("hidden", !isDetail);
-    listEmptyState.classList.toggle("hidden", isDetail);
-    const emptyTitle = emptyState.querySelector("h2");
-    const emptyMessage = emptyState.querySelector("p");
-    const listEmptyTitle = listEmptyState.querySelector("h3");
-    const listEmptyMessage = listEmptyState.querySelector("p");
-    if (emptyTitle) emptyTitle.textContent = syncState.title;
-    if (emptyMessage) emptyMessage.textContent = syncState.message;
-    if (listEmptyTitle) listEmptyTitle.textContent = syncState.title;
-    if (listEmptyMessage) listEmptyMessage.textContent = syncState.message;
-    statusBadge.textContent = syncState.badge;
-    statusBadge.className = syncState.badgeClass;
-    emptyActionBtn.textContent = syncState.actionLabel || "";
-    emptyActionBtn.classList.toggle("hidden", !syncState.action);
-    emptyActionBtn.disabled = !syncState.action;
-    emptyActionBtn.dataset.action = syncState.action || "";
-    listEmptyActionBtn.textContent = syncState.actionLabel || "";
-    listEmptyActionBtn.classList.toggle("hidden", !syncState.action);
-    listEmptyActionBtn.disabled = !syncState.action;
-    listEmptyActionBtn.dataset.action = syncState.action || "";
-    taskList.replaceChildren();
-    selectedRunTaskIds.clear();
-    runSelectedBtn.disabled = true;
-    newTaskBtn.disabled = true;
-    refreshTasksBtn.disabled = refreshInProgress;
-    selectionHelp.textContent = "Sign in to Penut before loading or creating browser tasks.";
-    return;
-  }
 
   if (!task) {
     taskDetails.classList.add("hidden");
     emptyState.classList.toggle("hidden", !isDetail);
     listEmptyState.classList.toggle("hidden", isDetail || isSettings);
-    const syncState = describeSyncState(state);
     const emptyTitle = emptyState.querySelector("h2");
     const emptyMessage = emptyState.querySelector("p");
     const listEmptyTitle = listEmptyState.querySelector("h3");
     const listEmptyMessage = listEmptyState.querySelector("p");
-    if (emptyTitle) emptyTitle.textContent = syncState.title;
+    if (emptyTitle) emptyTitle.textContent = "No tasks yet";
     if (emptyMessage) {
-      emptyMessage.textContent = syncState.message;
+      emptyMessage.textContent = "Create a task, describe what should happen in the browser, then run it.";
     }
-    if (listEmptyTitle) listEmptyTitle.textContent = syncState.title;
-    if (listEmptyMessage) listEmptyMessage.textContent = syncState.message;
-    statusBadge.textContent = syncState.badge;
-    statusBadge.className = syncState.badgeClass;
-    emptyActionBtn.textContent = syncState.actionLabel || "";
-    emptyActionBtn.classList.toggle("hidden", !syncState.action);
-    emptyActionBtn.disabled = !syncState.action;
-    emptyActionBtn.dataset.action = syncState.action || "";
-    listEmptyActionBtn.textContent = syncState.actionLabel || "";
-    listEmptyActionBtn.classList.toggle("hidden", !syncState.action);
-    listEmptyActionBtn.disabled = !syncState.action;
-    listEmptyActionBtn.dataset.action = syncState.action || "";
+    if (listEmptyTitle) listEmptyTitle.textContent = "No tasks yet";
+    if (listEmptyMessage) {
+      listEmptyMessage.textContent = "Create a task, describe what should happen in the browser, then run it.";
+    }
+    statusBadge.textContent = isSettings ? profileStatusText() : "No tasks";
+    statusBadge.className = "badge";
+    emptyActionBtn.textContent = "New task";
+    emptyActionBtn.classList.remove("hidden");
+    emptyActionBtn.disabled = false;
+    listEmptyActionBtn.textContent = "New task";
+    listEmptyActionBtn.classList.remove("hidden");
+    listEmptyActionBtn.disabled = false;
     taskList.replaceChildren();
+    selectedRunTaskIds.clear();
+    runSelectedBtn.disabled = true;
+    newTaskBtn.disabled = runInProgress;
+    refreshTasksBtn.disabled = refreshInProgress;
+    selectionHelp.textContent = "Create a task to get started.";
     return;
   }
+
   selectedTaskId = task.id;
   const currentTaskRunning = task.status === "running";
   const runnableTasks = (state.tasks || []).filter(taskCanRun);
@@ -290,7 +252,7 @@ function render(state) {
         event.stopPropagation();
         setScreen("detail");
         promptDirty = false;
-        render(await window.penutOperator.selectTask(item.id));
+        render(await window.browserOperator.selectTask(item.id));
       });
       card.addEventListener("click", () => {
         if (runInProgress || !canRun) return;
@@ -332,58 +294,8 @@ function render(state) {
   );
 }
 
-function describeSyncState(state) {
-  if (!isPenutSignedIn()) {
-    const authMessage = currentReadiness.checks.find((check) => check.id === "penutConnection")?.message;
-    return {
-      title: "Sign in to Penut",
-      message: authMessage || "Sign in to load browser tasks assigned to your Penut account and create new tasks from Operator.",
-      badge: "Sign in needed",
-      badgeClass: "badge approved",
-      action: "sign_in",
-      actionLabel: "Sign in to Penut",
-    };
-  }
-
-  if (!state?.syncError) {
-    return {
-      title: "No approvals",
-      message: "No approved browser tasks are assigned to you yet.",
-      badge: "No tasks",
-      badgeClass: "badge",
-      action: null,
-      actionLabel: "",
-    };
-  }
-
-  if (state.syncErrorReason === "auth_required") {
-    return {
-      title: "Sign in to Penut",
-      message: state.syncError,
-      badge: "Sign in needed",
-      badgeClass: "badge approved",
-      action: "sign_in",
-      actionLabel: "Sign in to Penut",
-    };
-  }
-
-  return {
-    title: "Cannot load approvals",
-    message: state.syncError,
-    badge: "Connection issue",
-    badgeClass: "badge failed",
-    action: "refresh",
-    actionLabel: "Try again",
-  };
-}
-
-function isPenutSignedIn() {
-  return Boolean(currentReadiness.checks.find((check) => check.id === "penutConnection")?.ready);
-}
-
 function renderSettings(settingsPayload) {
   currentSettings = settingsPayload.settings;
-  currentAuth = settingsPayload.auth || null;
   chromeProfileData = settingsPayload.chromeProfiles;
   currentReadiness = settingsPayload.readiness || { ready: false, checks: [] };
   const profiles = chromeProfileData.profiles || [];
@@ -407,7 +319,6 @@ function renderSettings(settingsPayload) {
     ? `Operator will use Chrome profile data from ${chromeProfileData.userDataDir}.`
     : "No Chrome profiles were found on this computer.";
 
-  renderAuthState();
   const runtimeNeedsRepair = currentReadiness.checks.some((check) =>
     ["pythonWorker", "workerScript", "automationEngine"].includes(check.id) &&
     !check.ready
@@ -434,50 +345,6 @@ function renderSettings(settingsPayload) {
   );
 }
 
-function renderAuthState(input = {}) {
-  const options = typeof input === "string" ? { message: input, state: "error" } : input;
-  const penut = currentReadiness.checks.find((check) => check.id === "penutConnection");
-  const signedIn = Boolean(penut?.ready);
-  const state = options.state || (signedIn ? "connected" : "idle");
-  const waiting = state === "waiting";
-  const error = state === "error";
-  const expiresAt = options.expiresAt ? new Date(options.expiresAt) : null;
-  const expiresText =
-    expiresAt instanceof Date && !Number.isNaN(expiresAt.getTime())
-      ? ` ${formatExpiry(expiresAt)}`
-      : "";
-
-  authCard.classList.toggle("waiting", waiting);
-  authCard.classList.toggle("connected", state === "connected");
-  authCard.classList.toggle("error", error);
-  authHelp.textContent =
-    options.message ||
-    currentAuth?.label ||
-    penut?.message ||
-    "Sign in to load and run your assigned browser tasks.";
-  if (waiting) {
-    authHelp.textContent =
-      `${options.message || "Waiting for browser approval. Return here after you click Connect Operator."}${expiresText}`;
-  }
-
-  authCode.textContent = options.userCode ? `Code: ${options.userCode}` : "";
-  authCode.classList.toggle("hidden", !options.userCode || !waiting);
-
-  signInBtn.classList.toggle("hidden", signedIn);
-  signOutBtn.classList.toggle("hidden", !signedIn);
-  reopenAuthBtn.classList.toggle("hidden", !waiting || !options.verificationUrl);
-  cancelAuthBtn.classList.toggle("hidden", !waiting);
-  signInBtn.disabled = waiting;
-  signOutBtn.disabled = false;
-}
-
-function formatExpiry(date) {
-  const ms = date.getTime() - Date.now();
-  if (ms <= 0) return "This sign-in has expired.";
-  const mins = Math.max(1, Math.ceil(ms / 60000));
-  return `Expires in ${mins} minute${mins === 1 ? "" : "s"}.`;
-}
-
 function profileStatusText() {
   if (!currentSettings?.chromeProfileDirectory) return "Setup needed";
   return currentSettings.chromeProfileName || currentSettings.chromeProfileDirectory;
@@ -486,49 +353,46 @@ function profileStatusText() {
 function userFacingError(error, fallback = "Something went wrong. Try again.") {
   const message = String(error?.message || error || "");
   if (/Error invoking remote method/i.test(message)) return fallback;
-  if (/Penut request failed \(404\)|not found/i.test(message)) {
-    return "This Penut server does not support that Operator action yet. Update the server, then try again.";
-  }
-  if (/Penut request failed \(\d+\)/i.test(message)) {
-    return "Penut could not complete that request. Try again in a moment.";
-  }
-  if (/fetch failed|network|ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(message)) {
-    return "Cannot reach Penut right now. Check your connection and try again.";
+  if (/OPENAI_API_KEY|model access/i.test(message)) {
+    return "Add OPENAI_API_KEY to your .env file, then restart Operator.";
   }
   return message || fallback;
 }
 
 async function refresh() {
-  if (!window.penutOperator) {
+  if (!window.browserOperator) {
     throw new Error("Operator preload did not initialize.");
   }
-  renderSettings(await window.penutOperator.getSettings());
-  render(await window.penutOperator.getTask());
-  await resumePendingSignIn();
+  renderSettings(await window.browserOperator.getSettings());
+  render(await window.browserOperator.getTask());
 }
 
 async function refreshTasks() {
-  if (!window.penutOperator || refreshInProgress) return;
+  if (!window.browserOperator || refreshInProgress) return;
   refreshInProgress = true;
   refreshTasksBtn.disabled = true;
   try {
-    render(await window.penutOperator.getTask());
+    render(await window.browserOperator.getTask());
   } finally {
     refreshInProgress = false;
     refreshTasksBtn.disabled = false;
   }
 }
 
+async function createNewTask() {
+  setScreen("detail");
+  promptDirty = false;
+  render(await window.browserOperator.createTask(""));
+  taskPrompt.focus();
+}
+
 taskPrompt.addEventListener("input", () => {
   promptDirty = true;
 });
 
-newTaskBtn.addEventListener("click", async () => {
-  setScreen("detail");
-  promptDirty = false;
-  render(await window.penutOperator.createTask(""));
-  taskPrompt.focus();
-});
+newTaskBtn.addEventListener("click", createNewTask);
+listEmptyActionBtn.addEventListener("click", createNewTask);
+emptyActionBtn.addEventListener("click", createNewTask);
 
 backBtn.addEventListener("click", () => {
   setScreen("list");
@@ -546,25 +410,25 @@ runSelectedBtn.addEventListener("click", async () => {
     const orderedTaskIds = (currentState?.tasks || [])
       .filter((task) => selectedRunTaskIds.has(task.id) && taskCanRun(task))
       .map((task) => task.id);
-    const result = await window.penutOperator.runTasks(orderedTaskIds, {});
+    const result = await window.browserOperator.runTasks(orderedTaskIds, {});
     selectedRunTaskIds.clear();
     if (result.state) render(result.state);
     if (!result.ok && result.error) {
       statusBadge.textContent = userFacingError(result.error, "Operator could not run the selected tasks.");
       statusBadge.className = "badge failed";
-      if (/before running tasks|setup|install|model access/i.test(result.error)) {
+      if (/before running tasks|setup|install|model access|OPENAI_API_KEY|Chrome profile/i.test(result.error)) {
         setScreen("settings");
-        renderSettings(await window.penutOperator.getSettings());
+        renderSettings(await window.browserOperator.getSettings());
         render(currentState);
       }
     }
   } finally {
     runInProgress = false;
-    render(await window.penutOperator.getTask());
+    render(await window.browserOperator.getTask());
   }
 });
 
-approvalsNavBtn.addEventListener("click", () => {
+tasksNavBtn.addEventListener("click", () => {
   setScreen("list");
   promptDirty = false;
   render(currentState);
@@ -572,103 +436,21 @@ approvalsNavBtn.addEventListener("click", () => {
 
 settingsNavBtn.addEventListener("click", async () => {
   setScreen("settings");
-  renderSettings(await window.penutOperator.getSettings());
+  renderSettings(await window.browserOperator.getSettings());
   render(currentState);
 });
 
 saveSettingsBtn.addEventListener("click", async () => {
   const directory = chromeProfileSelect.value;
   const profile = (chromeProfileData.profiles || []).find((item) => item.directory === directory);
-  renderSettings(await window.penutOperator.updateSettings({
+  renderSettings(await window.browserOperator.updateSettings({
     chromeUserDataDir: chromeProfileData.userDataDir,
     chromeProfileDirectory: directory,
     chromeProfileName: profile?.name || directory,
   }));
-  render(await window.penutOperator.getTask());
+  render(await window.browserOperator.getTask());
   statusBadge.textContent = "Profile saved";
   statusBadge.className = "badge completed";
-});
-
-async function startSignIn() {
-  signInBtn.disabled = true;
-  emptyActionBtn.disabled = true;
-  listEmptyActionBtn.disabled = true;
-  renderAuthState({ state: "waiting", message: "Opening the browser approval page..." });
-  try {
-    const auth = await window.penutOperator.startAuth();
-    if (!auth.ok) {
-      currentPendingAuth = null;
-      renderAuthState({ state: "error", message: auth.error || "Could not start sign-in. Try again." });
-      signInBtn.disabled = false;
-      emptyActionBtn.disabled = false;
-      listEmptyActionBtn.disabled = false;
-      return;
-    }
-    currentPendingAuth = auth;
-    renderAuthState({
-      state: "waiting",
-      message: "Waiting for browser approval. Click Connect Operator in the browser, then return here.",
-      userCode: auth.userCode,
-      verificationUrl: auth.verificationUrl,
-      expiresAt: auth.expiresAt,
-    });
-    startAuthPolling(auth);
-  } catch (error) {
-    currentPendingAuth = null;
-    renderAuthState({ state: "error", message: userFacingError(error, "Could not start sign-in. Try again.") });
-    signInBtn.disabled = false;
-    emptyActionBtn.disabled = false;
-    listEmptyActionBtn.disabled = false;
-  }
-}
-
-signInBtn.addEventListener("click", startSignIn);
-
-reopenAuthBtn.addEventListener("click", async () => {
-  const result = await window.penutOperator.openPendingAuth();
-  if (!result.ok) {
-    renderAuthState({ state: "error", message: result.error || "Could not open the approval page. Start sign-in again." });
-  }
-});
-
-cancelAuthBtn.addEventListener("click", async () => {
-  stopAuthPolling();
-  currentPendingAuth = null;
-  renderSettings(await window.penutOperator.cancelAuth());
-});
-
-emptyActionBtn.addEventListener("click", async () => {
-  await handleEmptyAction(emptyActionBtn.dataset.action);
-});
-
-listEmptyActionBtn.addEventListener("click", async () => {
-  await handleEmptyAction(listEmptyActionBtn.dataset.action);
-});
-
-async function handleEmptyAction(action) {
-  if (action === "sign_in") {
-    setScreen("settings");
-    renderSettings(await window.penutOperator.getSettings());
-    render(currentState);
-    await nextPaint();
-    await startSignIn();
-    return;
-  }
-  if (action === "refresh") {
-    await refreshTasks();
-  }
-}
-
-function nextPaint() {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
-}
-
-signOutBtn.addEventListener("click", async () => {
-  signOutBtn.disabled = true;
-  stopAuthPolling();
-  currentPendingAuth = null;
-  renderSettings(await window.penutOperator.logoutAuth());
-  render(await window.penutOperator.getTask());
 });
 
 repairRuntimeBtn.addEventListener("click", async () => {
@@ -677,7 +459,7 @@ repairRuntimeBtn.addEventListener("click", async () => {
   statusBadge.textContent = "Repairing runtime";
   statusBadge.className = "badge approved";
   try {
-    const result = await window.penutOperator.repairRuntime();
+    const result = await window.browserOperator.repairRuntime();
     if (result.settings) renderSettings(result.settings);
     if (!result.ok) {
       statusBadge.textContent = userFacingError(result.error, "Operator could not repair the runtime.");
@@ -691,55 +473,9 @@ repairRuntimeBtn.addEventListener("click", async () => {
     statusBadge.className = "badge failed";
   } finally {
     repairRuntimeBtn.textContent = "Repair runtime";
-    renderSettings(await window.penutOperator.getSettings());
+    renderSettings(await window.browserOperator.getSettings());
   }
 });
-
-async function resumePendingSignIn() {
-  const pending = await window.penutOperator.getPendingAuth();
-  if (!pending.pending || authPollTimer) return;
-  currentPendingAuth = pending;
-  renderAuthState({
-    state: "waiting",
-    message: "Still waiting for browser approval. If the browser tab closed, open it again.",
-    userCode: pending.userCode,
-    verificationUrl: pending.verificationUrl,
-    expiresAt: pending.expiresAt,
-  });
-  startAuthPolling(pending);
-}
-
-function startAuthPolling(pending = {}) {
-  stopAuthPolling();
-  const poll = async () => {
-    try {
-      const result = await window.penutOperator.pollAuth();
-      if (result.pending) return;
-      stopAuthPolling();
-      if (result.authenticated && result.settings) {
-        currentPendingAuth = null;
-        renderSettings(result.settings);
-        render(await window.penutOperator.getTask());
-        statusBadge.textContent = "Signed in";
-        statusBadge.className = "badge completed";
-        return;
-      }
-      currentPendingAuth = null;
-      renderAuthState({ state: "error", message: result.error || "Sign-in was not completed. Try again." });
-    } catch (error) {
-      stopAuthPolling();
-      renderAuthState({ state: "error", message: userFacingError(error, "Could not finish sign-in. Try again.") });
-    }
-  };
-  authPollTimer = setInterval(poll, 2500);
-  void poll();
-}
-
-function stopAuthPolling() {
-  if (!authPollTimer) return;
-  clearInterval(authPollTimer);
-  authPollTimer = null;
-}
 
 saveTaskBtn.addEventListener("click", async () => {
   if (runInProgress) return;
@@ -749,7 +485,7 @@ saveTaskBtn.addEventListener("click", async () => {
   lastRenderedPrompt = prompt;
   promptDirty = false;
   saveTaskBtn.disabled = true;
-  render(await window.penutOperator.updateTask({ prompt }));
+  render(await window.browserOperator.updateTask({ prompt }));
   statusBadge.textContent = "Changes saved";
   statusBadge.className = "badge completed";
 });
@@ -764,39 +500,29 @@ approveBtn.addEventListener("click", async () => {
     taskPrompt.value = prompt;
     lastRenderedPrompt = prompt;
     promptDirty = false;
-    const result = await window.penutOperator.runAgent(prompt);
+    const result = await window.browserOperator.runAgent(prompt);
     if (result.state) render(result.state);
     if (!result.ok && result.error) {
       statusBadge.textContent = userFacingError(result.error, "Operator could not run this task.");
       statusBadge.className = "badge failed";
-      if (/before running tasks|setup|install|model access/i.test(result.error)) {
+      if (/before running tasks|setup|install|model access|OPENAI_API_KEY|Chrome profile/i.test(result.error)) {
         setScreen("settings");
-        renderSettings(await window.penutOperator.getSettings());
+        renderSettings(await window.browserOperator.getSettings());
         render(currentState);
       }
     }
   } finally {
     runInProgress = false;
-    render(await window.penutOperator.getTask());
+    render(await window.browserOperator.getTask());
   }
 });
 
 stopBtn.addEventListener("click", async () => {
-  const result = await window.penutOperator.stopAgent();
+  const result = await window.browserOperator.stopAgent();
   if (result.state) render(result.state);
 });
 
-if (window.penutOperator) window.penutOperator.onTaskChanged(render);
-window.addEventListener("focus", () => {
-  void resumePendingSignIn();
-  void refreshTasks();
-});
-setInterval(() => {
-  if (document.visibilityState === "visible" && currentScreen === "list") {
-    void resumePendingSignIn();
-    void refreshTasks();
-  }
-}, 15000);
+if (window.browserOperator) window.browserOperator.onTaskChanged(render);
 refresh().catch((error) => {
   statusBadge.textContent = userFacingError(error, "Operator could not load.");
   statusBadge.className = "badge failed";

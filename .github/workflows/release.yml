@@ -2,15 +2,6 @@ name: Release Operator
 
 on:
   workflow_dispatch:
-    inputs:
-      channel:
-        description: Release channel
-        required: true
-        default: prod
-        type: choice
-        options:
-          - prod
-          - dev
 
 jobs:
   mac:
@@ -31,9 +22,8 @@ jobs:
             runtime_sha256: 064731aded38b1a12909088d40d9e0e385dc989e38a1e1de9917610254194962
             dist_script: dist:mac:x64:ci
     env:
-      PENUT_OPERATOR_CHANNEL: ${{ inputs.channel }}
-      PENUT_STANDALONE_PYTHON_ARCHIVE_URL: ${{ matrix.runtime_url }}
-      PENUT_STANDALONE_PYTHON_ARCHIVE_SHA256: ${{ matrix.runtime_sha256 }}
+      OPERATOR_STANDALONE_PYTHON_ARCHIVE_URL: ${{ matrix.runtime_url }}
+      OPERATOR_STANDALONE_PYTHON_ARCHIVE_SHA256: ${{ matrix.runtime_sha256 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,22 +33,21 @@ jobs:
       - run: npm ci
       - run: npm run verify
       - run: npm run build:runtime
-      - run: echo "PENUT_PYTHON_RUNTIME_ARCHIVE_FILE=$(find build/runtime-archives -type f | head -n 1)" >> "$GITHUB_ENV"
+      - run: echo "OPERATOR_PYTHON_RUNTIME_ARCHIVE_FILE=$(find build/runtime-archives -type f | head -n 1)" >> "$GITHUB_ENV"
       - run: npm run prepare:runtime
       - run: npm run verify:runtime
       - run: npm run ${{ matrix.dist_script }}
       - uses: actions/upload-artifact@v4
         with:
-          name: penut-operator-macos-${{ matrix.arch }}
+          name: browser-operator-macos-${{ matrix.arch }}
           path: release/*
 
   windows:
     name: Build Windows x64
     runs-on: windows-latest
     env:
-      PENUT_OPERATOR_CHANNEL: ${{ inputs.channel }}
-      PENUT_STANDALONE_PYTHON_ARCHIVE_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20260610/cpython-3.13.14%2B20260610-x86_64-pc-windows-msvc-install_only_stripped.tar.gz
-      PENUT_STANDALONE_PYTHON_ARCHIVE_SHA256: 2933d50847057b9131ff89578a220b9206c40fd6bc34d0c12afb716bd9bf8fc9
+      OPERATOR_STANDALONE_PYTHON_ARCHIVE_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20260610/cpython-3.13.14%2B20260610-x86_64-pc-windows-msvc-install_only_stripped.tar.gz
+      OPERATOR_STANDALONE_PYTHON_ARCHIVE_SHA256: 2933d50847057b9131ff89578a220b9206c40fd6bc34d0c12afb716bd9bf8fc9
       CSC_IDENTITY_AUTO_DISCOVERY: false
       CSC_NAME: "-"
     steps:
@@ -73,11 +62,11 @@ jobs:
       - shell: pwsh
         run: |
           $archive = Get-ChildItem build/runtime-archives -File | Select-Object -First 1
-          "PENUT_PYTHON_RUNTIME_ARCHIVE_FILE=$($archive.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "OPERATOR_PYTHON_RUNTIME_ARCHIVE_FILE=$($archive.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
       - run: npm run prepare:runtime
       - run: npm run verify:runtime
       - run: npm run dist:win:x64:ci
       - uses: actions/upload-artifact@v4
         with:
-          name: penut-operator-windows-x64
+          name: browser-operator-windows-x64
           path: release/*

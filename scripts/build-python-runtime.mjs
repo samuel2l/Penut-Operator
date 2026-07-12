@@ -18,12 +18,12 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const runtimeRoot = join(root, "build", "runtime-work");
 const archiveDir = join(root, "build", "runtime-archives");
 const requirementsPath = join(root, "python", "requirements.txt");
-const standaloneArchiveUrl = process.env.PENUT_STANDALONE_PYTHON_ARCHIVE_URL;
-const standaloneArchiveFile = process.env.PENUT_STANDALONE_PYTHON_ARCHIVE_FILE;
-const standaloneArchiveSha256 = process.env.PENUT_STANDALONE_PYTHON_ARCHIVE_SHA256;
+const standaloneArchiveUrl = process.env.OPERATOR_STANDALONE_PYTHON_ARCHIVE_URL;
+const standaloneArchiveFile = process.env.OPERATOR_STANDALONE_PYTHON_ARCHIVE_FILE;
+const standaloneArchiveSha256 = process.env.OPERATOR_STANDALONE_PYTHON_ARCHIVE_SHA256;
 const platform = process.platform;
 const arch = process.arch;
-const archiveBaseName = `penut-operator-python-runtime-${platform}-${arch}`;
+const archiveBaseName = `browser-operator-python-runtime-${platform}-${arch}`;
 const archivePath =
   platform === "win32"
     ? join(archiveDir, `${archiveBaseName}.zip`)
@@ -35,7 +35,7 @@ mkdirSync(archiveDir, { recursive: true });
 
 if (!standaloneArchiveUrl && !standaloneArchiveFile) {
   throw new Error(
-    "Set PENUT_STANDALONE_PYTHON_ARCHIVE_URL or PENUT_STANDALONE_PYTHON_ARCHIVE_FILE to build a portable runtime.",
+    "Set OPERATOR_STANDALONE_PYTHON_ARCHIVE_URL or OPERATOR_STANDALONE_PYTHON_ARCHIVE_FILE to build a portable runtime.",
   );
 }
 
